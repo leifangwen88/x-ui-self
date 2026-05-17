@@ -3,6 +3,7 @@ package controller
 import (
 	"net"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -38,10 +39,16 @@ func (a *SubscriptionController) serve(c *gin.Context) {
 	if subType == "" {
 		subType = "base64"
 	}
+	gameId := -1
+	if g := strings.TrimSpace(c.Query("gameId")); g != "" {
+		if n, err := strconv.Atoi(g); err == nil {
+			gameId = n
+		}
+	}
 
 	switch subType {
 	case "clash":
-		body := a.subService.GenClashSubscription(subHost, reqHost)
+		body := a.subService.GenClashSubscription(subHost, reqHost, gameId)
 		if body == "" {
 			c.String(http.StatusNotFound, "No available nodes")
 			return
@@ -50,7 +57,7 @@ func (a *SubscriptionController) serve(c *gin.Context) {
 		c.Header("Content-Disposition", "attachment; filename=clash.yaml")
 		c.String(http.StatusOK, body)
 	case "links":
-		body := a.subService.GenLinksText(subHost, reqHost)
+		body := a.subService.GenLinksText(subHost, reqHost, gameId)
 		if body == "" {
 			c.String(http.StatusNotFound, "No available nodes")
 			return
@@ -58,7 +65,7 @@ func (a *SubscriptionController) serve(c *gin.Context) {
 		c.Header("Content-Type", "text/plain; charset=utf-8")
 		c.String(http.StatusOK, body)
 	default:
-		body := a.subService.GenBase64Subscription(subHost, reqHost)
+		body := a.subService.GenBase64Subscription(subHost, reqHost, gameId)
 		if body == "" {
 			c.String(http.StatusNotFound, "No available nodes")
 			return

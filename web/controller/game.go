@@ -8,7 +8,9 @@ import (
 )
 
 type GameController struct {
-	gameService service.GameService
+	gameService          service.GameService
+	socksRotationService service.SocksRotationService
+	xrayService          service.XrayService
 }
 
 func NewGameController(g *gin.RouterGroup) *GameController {
@@ -24,6 +26,8 @@ func (a *GameController) initRouter(g *gin.RouterGroup) {
 	g.POST("/add", a.add)
 	g.POST("/update/:id", a.update)
 	g.POST("/del/:id", a.del)
+	g.POST("/rotateCheck/:id", a.rotateCheck)
+	g.POST("/batchRotate/:id", a.batchRotate)
 }
 
 func (a *GameController) list(c *gin.Context) {
@@ -68,6 +72,42 @@ func (a *GameController) update(c *gin.Context) {
 	game.Id = id
 	err = a.gameService.Save(game)
 	jsonMsg(c, "修改游戏", err)
+}
+
+func (a *GameController) rotateCheck(c *gin.Context) {
+	id, err := strconv.Atoi(c.Param("id"))
+	if err != nil {
+		jsonMsg(c, "轮换检查", err)
+		return
+	}
+	result, err := a.socksRotationService.CheckGameRotate(id)
+	if err != nil {
+		jsonMsg(c, "轮换检查", err)
+		return
+	}
+	jsonObj(c, result, nil)
+}
+
+func (a *GameController) batchRotate(c *gin.Context) {
+	id, err := strconv.Atoi(c.Param("id"))
+	if err != nil {
+		jsonMsg(c, "批量轮换", err)
+		return
+	}
+	req := struct {
+		Items []service.GameBatchRotateItem `json:"items" form:"items"`
+	}{}
+	if err := c.ShouldBind(&req); err != nil {
+		jsonMsg(c, "批量轮换", err)
+		return
+	}
+	ok, err := a.socksRotationService.BatchRotateGame(id, req.Items)
+	if err != nil {
+		jsonMsg(c, "批量轮换", err)
+		return
+	}
+	a.xrayService.SetToNeedRestart()
+	jsonObj(c, map[string]int{"rotated": ok}, nil)
 }
 
 func (a *GameController) del(c *gin.Context) {

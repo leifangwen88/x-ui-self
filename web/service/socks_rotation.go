@@ -1,6 +1,7 @@
 package service
 
 import (
+	"fmt"
 	"time"
 	"x-ui/database"
 	"x-ui/database/model"
@@ -158,4 +159,92 @@ func (s *SocksRotationService) RotateInbound(inboundId int, outgoingMark string,
 		ToSocksId:   pick.Id,
 		GameId:      inbound.GameId,
 	}, nil
+}
+
+type GameRotateCheckResult struct {
+	GameId         int    `json:"gameId"`
+	InboundCount   int    `json:"inboundCount"`
+	PoolAvailable  int    `json:"poolAvailable"`
+	Enough         bool   `json:"enough"`
+	Message        string `json:"message"`
+}
+
+type GameBatchRotateItem struct {
+	InboundId    int    `json:"inboundId" form:"inboundId"`
+	OutgoingMark string `json:"outgoingMark" form:"outgoingMark"`
+}
+
+func (s *SocksRotationService) CheckGameRotate(gameId int) (*GameRotateCheckResult, error) {
+	if gameId <= 0 {
+		return nil, common.NewError("无效的游戏")
+	}
+	gameService := GameService{}
+	list, err := gameService.ListWithStats()
+	if err != nil {
+		return nil, err
+	}
+	var stats *GameIpStats
+	for _, g := range list {
+		if g.Id == gameId {
+			stats = &g.Stats
+			break
+		}
+	}
+	if stats == nil {
+		return nil, common.NewError("游戏不存在")
+	}
+	inbounds, err := s.inboundService.GetAllInbounds()
+	if err != nil {
+		return nil, err
+	}
+	count := 0
+	for _, ib := range inbounds {
+		if ib.GameId == gameId && ib.Enable {
+			count++
+		}
+	}
+	pool := stats.FreshAvailable + stats.OldAvailable
+	res := &GameRotateCheckResult{
+		GameId:        gameId,
+		InboundCount:  count,
+		PoolAvailable: pool,
+		Enough:        pool >= count && count > 0,
+	}
+	if count == 0 {
+		res.Message = "该游戏下没有已启用的入站"
+	} else if !res.Enough {
+		res.Message = fmt.Sprintf("可用 IP 不足：需要 %d 个，当前可用 %d 个（未过期且未封禁）", count, pool)
+	} else {
+		res.Message = fmt.Sprintf("可轮换 %d 个入站，当前可用 IP %d 个", count, pool)
+	}
+	return res, nil
+}
+
+func (s *SocksRotationService) BatchRotateGame(gameId int, items []GameBatchRotateItem) (int, error) {
+	if len(items) == 0 {
+		return 0, common.NewError("没有可轮换的入站")
+	}
+	check, err := s.CheckGameRotate(gameId)
+	if err != nil {
+		return 0, err
+	}
+	if !check.Enough {
+		return 0, common.NewError(check.Message)
+	}
+	ok := 0
+	for _, item := range items {
+		ib, err := s.inboundService.GetInbound(item.InboundId)
+		if err != nil {
+			return ok, err
+		}
+		if ib.GameId != gameId {
+			return ok, common.NewError("入站与游戏不匹配:", item.InboundId)
+		}
+		_, err = s.RotateInbound(item.InboundId, item.OutgoingMark, "game_batch")
+		if err != nil {
+			return ok, err
+		}
+		ok++
+	}
+	return ok, nil
 }

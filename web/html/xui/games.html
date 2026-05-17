@@ -62,6 +62,8 @@
                             <span v-else style="color:#999;">-</span>
                         </template>
                         <template slot="action" slot-scope="text, record">
+                            <a-button type="link" :disabled="!record.inbounds || !record.inbounds.length"
+                                      @click="openGameBatchRotate(record)">批量轮换</a-button>
                             <a-button type="link" @click="openEdit(record)">编辑</a-button>
                             <a-button type="link" style="color:#f5222d;" @click="delGame(record)">删除</a-button>
                         </template>
@@ -87,6 +89,33 @@
                     </a-form-item>
                 </a-form>
             </a-modal>
+            <a-modal v-model="rotateModal.visible"
+                     :title="'批量轮换 · ' + (rotateModal.gameName || '')"
+                     :closable="!rotateModal.loading" :mask-closable="false"
+                     width="640" @ok="confirmGameBatchRotate" :confirm-loading="rotateModal.loading"
+                     ok-text="确认轮换" cancel-text="取消">
+                <a-alert v-if="rotateModal.checkMsg" :type="rotateModal.checkOk ? 'info' : 'warning'"
+                         show-icon style="margin-bottom:12px;" :message="rotateModal.checkMsg"></a-alert>
+                <a-alert type="warning" show-icon style="margin-bottom:12px;"
+                         message="有当前 IP 的入站必须先标记「用过」或「封禁过」"></a-alert>
+                <div style="max-height:420px;overflow-y:auto;">
+                    <div v-for="item in rotateModal.items" :key="item.inboundId"
+                         style="border:1px solid #f0f0f0;border-radius:4px;padding:12px;margin-bottom:10px;">
+                        <div style="margin-bottom:8px;">
+                            <b>[[ item.remark || ('入站#' + item.inboundId) ]]</b>
+                            <span v-if="item.socksProxyId > 0"> · SOCKS #[[ item.socksProxyId ]]</span>
+                            <span v-else style="color:#52c41a;"> · 未绑 IP</span>
+                        </div>
+                        <div v-if="item.socksProxyId > 0">
+                            <span style="color:#f5222d;">*</span> 标记：
+                            <a-radio-group v-model="item.outgoingMark" style="margin-left:8px;">
+                                <a-radio value="used">用过</a-radio>
+                                <a-radio value="banned">封禁过</a-radio>
+                            </a-radio-group>
+                        </div>
+                    </div>
+                </div>
+            </a-modal>
         </a-layout-content>
     </a-layout>
 </a-layout>
@@ -102,7 +131,7 @@
         { title: '启用', scopedSlots: { customRender: 'enable' }, width: 80 },
         { title: '绑定入站', scopedSlots: { customRender: 'inbounds' }, width: 320 },
         { title: '备注', scopedSlots: { customRender: 'remark' }, width: 100 },
-        { title: '操作', scopedSlots: { customRender: 'action' }, width: 140 },
+        { title: '操作', scopedSlots: { customRender: 'action' }, width: 200 },
     ];
 
     const app = new Vue({
@@ -117,6 +146,15 @@
                 loading: false,
                 title: '',
                 game: { id: 0, name: '', code: '', enable: true, sortOrder: 0, remark: '' },
+            },
+            rotateModal: {
+                visible: false,
+                loading: false,
+                gameId: 0,
+                gameName: '',
+                checkMsg: '',
+                checkOk: false,
+                items: [],
             },
         },
         methods: {
@@ -179,6 +217,60 @@
                 this.modal.loading = false;
                 if (msg.success) {
                     this.modal.visible = false;
+                    await this.load();
+                }
+            },
+            async openGameBatchRotate(record) {
+                if (!record.inbounds || !record.inbounds.length) {
+                    this.$message.warning('该游戏下没有绑定的入站');
+                    return;
+                }
+                const checkMsg = await HttpUtil.post(`/xui/game/rotateCheck/${record.id}`);
+                if (!checkMsg.success) {
+                    return;
+                }
+                const check = checkMsg.obj || {};
+                if (!check.enough) {
+                    this.$message.warning(check.message || '可用 IP 不足，无法批量轮换');
+                    return;
+                }
+                this.rotateModal.gameId = record.id;
+                this.rotateModal.gameName = record.name;
+                this.rotateModal.checkMsg = check.message || '';
+                this.rotateModal.checkOk = !!check.enough;
+                this.rotateModal.items = record.inbounds.filter(ib => ib.enable).map(ib => ({
+                    inboundId: ib.id,
+                    remark: ib.remark,
+                    socksProxyId: ib.socksProxyId || 0,
+                    outgoingMark: '',
+                }));
+                if (this.rotateModal.items.length === 0) {
+                    this.$message.warning('没有已启用的入站可轮换');
+                    return;
+                }
+                this.rotateModal.visible = true;
+            },
+            async confirmGameBatchRotate() {
+                for (const item of this.rotateModal.items) {
+                    if (item.socksProxyId > 0 &&
+                        item.outgoingMark !== 'used' &&
+                        item.outgoingMark !== 'banned') {
+                        this.$message.warning(`请为「${item.remark || item.inboundId}」标记当前 IP`);
+                        return;
+                    }
+                }
+                this.rotateModal.loading = true;
+                const msg = await HttpUtil.post(`/xui/game/batchRotate/${this.rotateModal.gameId}`, {
+                    items: this.rotateModal.items.map(x => ({
+                        inboundId: x.inboundId,
+                        outgoingMark: x.outgoingMark || '',
+                    })),
+                });
+                this.rotateModal.loading = false;
+                if (msg.success) {
+                    const n = (msg.obj && msg.obj.rotated) || this.rotateModal.items.length;
+                    this.rotateModal.visible = false;
+                    this.$message.success(`批量轮换完成：${n} 条`);
                     await this.load();
                 }
             },

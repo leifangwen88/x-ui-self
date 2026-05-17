@@ -9,6 +9,93 @@ import (
 	"x-ui/database/model"
 )
 
+func GenClashYamlByGame(inbounds []*model.Inbound, subHost string, requestHost string) string {
+	gameName := make(map[int]string)
+	gameService := GameService{}
+	games, _ := gameService.GetAll()
+	for _, g := range games {
+		gameName[g.Id] = g.Name
+	}
+	byGame := make(map[int][]*model.Inbound)
+	order := make([]int, 0)
+	for _, ib := range inbounds {
+		if ib == nil || !ib.Enable || !InboundSupportsLink(ib.Protocol) {
+			continue
+		}
+		gid := ib.GameId
+		if gid <= 0 {
+			gid = 0
+		}
+		if _, ok := byGame[gid]; !ok {
+			order = append(order, gid)
+		}
+		byGame[gid] = append(byGame[gid], ib)
+	}
+	if len(order) == 0 {
+		return ""
+	}
+	var proxyBlocks []string
+	var allNames []string
+	groupBlocks := make([]string, 0)
+	for _, gid := range order {
+		list := byGame[gid]
+		gn := gameName[gid]
+		if gn == "" {
+			if gid == 0 {
+				gn = "未指定游戏"
+			} else {
+				gn = fmt.Sprintf("游戏#%d", gid)
+			}
+		}
+		var names []string
+		for _, ib := range list {
+			lines, name, ok := inboundToClashLines(ib, subHost, requestHost)
+			if !ok {
+				continue
+			}
+			names = append(names, name)
+			allNames = append(allNames, name)
+			block := "  -"
+			for _, line := range lines {
+				block += "\n    " + line
+			}
+			proxyBlocks = append(proxyBlocks, block)
+		}
+		if len(names) > 0 {
+			groupBlocks = append(groupBlocks, fmt.Sprintf("  - name: %s\n    type: select\n    proxies:", yamlQuote(gn)))
+			for _, n := range names {
+				groupBlocks = append(groupBlocks, "      - "+yamlQuote(n))
+			}
+			groupBlocks = append(groupBlocks, "      - DIRECT")
+		}
+	}
+	if len(allNames) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("# Clash / Mihomo 订阅（按游戏分组）\n")
+	b.WriteString("proxies:\n")
+	b.WriteString(strings.Join(proxyBlocks, "\n"))
+	b.WriteString("\n\nproxy-groups:\n")
+	b.WriteString(strings.Join(groupBlocks, "\n"))
+	b.WriteString("\n  - name: \"节点选择\"\n    type: select\n    proxies:\n")
+	for _, gid := range order {
+		gn := gameName[gid]
+		if gn == "" && gid == 0 {
+			gn = "未指定游戏"
+		} else if gn == "" {
+			gn = fmt.Sprintf("游戏#%d", gid)
+		}
+		if len(byGame[gid]) > 0 {
+			b.WriteString("      - ")
+			b.WriteString(yamlQuote(gn))
+			b.WriteString("\n")
+		}
+	}
+	b.WriteString("      - DIRECT\n\nrules:\n  - MATCH,节点选择\n")
+	return b.String()
+}
+
 func GenClashYaml(inbounds []*model.Inbound, subHost string, requestHost string) string {
 	var proxyBlocks []string
 	var names []string

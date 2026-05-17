@@ -55,28 +55,40 @@
                     </a-card>
                 </transition>
                 <transition name="list" appear>
-                    <a-card title="订阅地址" style="margin-bottom: 16px;" v-if="subInfo.token">
-                        <template slot="extra">
-                            <a-button size="small" @click="loadSubInfo">刷新</a-button>
-                            <a-button size="small" type="danger" ghost @click="resetSubToken">重置密钥</a-button>
-                        </template>
-                        <p style="color:#666;margin-bottom:12px;">
-                            将下方 URL 填入小火箭、Clash 等客户端的「订阅」；仅包含<b>已启用</b>且支持链接的入站。
-                            订阅密钥请勿泄露。
-                        </p>
-                        <a-form layout="vertical">
-                            <a-form-item label="订阅节点域名（可选）" style="margin-bottom:12px;">
-                                <a-input v-model.trim="subHostInput" placeholder="留空则使用访问订阅时的域名，如：game.example.com"
-                                         @blur="saveSubHost" @pressEnter="saveSubHost"></a-input>
-                            </a-form-item>
-                        </a-form>
-                        <a-list size="small" bordered :data-source="subUrlList">
-                            <a-list-item slot="renderItem" slot-scope="item">
-                                <a-list-item-meta :title="item.label" :description="subFullUrl(item.path)"></a-list-item-meta>
-                                <a-button type="link" size="small" @click="copyText(subFullUrl(item.path))">复制</a-button>
-                            </a-list-item>
-                        </a-list>
-                    </a-card>
+                    <a-collapse v-if="subInfo.token" v-model="subPanelActive" style="margin-bottom: 16px;background:#fff;">
+                        <a-collapse-panel key="sub" header="订阅地址（点击展开）">
+                            <template slot="extra">
+                                <a-button size="small" @click.stop="loadSubInfo">刷新</a-button>
+                                <a-button size="small" type="danger" ghost @click.stop="resetSubToken">重置密钥</a-button>
+                            </template>
+                            <p style="color:#666;margin-bottom:12px;">
+                                将 URL 填入客户端「订阅」；仅含<b>已启用</b>且支持链接的入站。密钥请勿泄露。
+                            </p>
+                            <a-form layout="vertical">
+                                <a-form-item label="订阅节点域名（可选）" style="margin-bottom:12px;">
+                                    <a-input v-model.trim="subHostInput" placeholder="留空则用访问订阅时的 IP/域名"
+                                             @blur="saveSubHost" @pressEnter="saveSubHost"></a-input>
+                                </a-form-item>
+                            </a-form>
+                            <a-collapse v-if="subInfo.groups && subInfo.groups.length" :bordered="false" style="margin-bottom:12px;">
+                                <a-collapse-panel v-for="g in subInfo.groups" :key="'g'+g.gameId"
+                                                  :header="g.gameName + '（' + g.inboundCount + ' 个入站）'">
+                                    <a-list size="small" bordered :data-source="subGroupUrlItems(g)">
+                                        <a-list-item slot="renderItem" slot-scope="item">
+                                            <a-list-item-meta :title="item.label" :description="subFullUrl(item.path)"></a-list-item-meta>
+                                            <a-button type="link" size="small" @click="copyText(subFullUrl(item.path))">复制</a-button>
+                                        </a-list-item>
+                                    </a-list>
+                                </a-collapse-panel>
+                            </a-collapse>
+                            <a-list v-else size="small" bordered :data-source="subUrlList">
+                                <a-list-item slot="renderItem" slot-scope="item">
+                                    <a-list-item-meta :title="item.label" :description="subFullUrl(item.path)"></a-list-item-meta>
+                                    <a-button type="link" size="small" @click="copyText(subFullUrl(item.path))">复制</a-button>
+                                </a-list-item>
+                            </a-list>
+                        </a-collapse-panel>
+                    </a-collapse>
                 </transition>
                 <transition name="list" appear>
                     <a-card hoverable>
@@ -142,7 +154,7 @@
                                           style="width: 110px;"
                                           @select="val => onGameSelect(dbInbound, val)">
                                     <a-select-option :value="0">未指定</a-select-option>
-                                    <a-select-option v-for="g in enabledGames" :key="g.id" :value="g.id">
+                                    <a-select-option v-for="g in gamesForSelect(dbInbound)" :key="g.id" :value="g.id">
                                         [[ g.name ]]
                                     </a-select-option>
                                 </a-select>
@@ -347,8 +359,9 @@
                 mode: 'single',
                 items: [],
             },
-            subInfo: { token: '', subHost: '', base64Path: '', linksPath: '', clashPath: '' },
+            subInfo: { token: '', subHost: '', base64Path: '', linksPath: '', clashPath: '', groups: [] },
             subHostInput: '',
+            subPanelActive: [],
         },
         methods: {
             subFullUrl(path) {
@@ -356,6 +369,24 @@
                 const origin = location.origin;
                 const p = (path || '').replace(/^\//, '');
                 return origin + base + p;
+            },
+            subGroupUrlItems(group) {
+                return [
+                    { label: '通用订阅', path: group.base64Path },
+                    { label: 'Clash 订阅', path: group.clashPath },
+                    { label: '纯文本链接', path: group.linksPath },
+                ];
+            },
+            gamesForSelect(dbInbound) {
+                const gid = this.gameSelectValue(dbInbound);
+                const list = this.enabledGames.slice();
+                if (gid > 0 && !list.some(g => g.id === gid)) {
+                    const g = (this.games || []).find(x => x.id === gid);
+                    if (g) {
+                        list.unshift(g);
+                    }
+                }
+                return list;
             },
             copyText(text) {
                 if (navigator.clipboard && navigator.clipboard.writeText) {
@@ -481,6 +512,12 @@
                 ]);
                 if (gameMsg.success) {
                     this.games = gameMsg.obj || [];
+                    for (const ib of this.dbInbounds) {
+                        const gid = parseInt(ib.gameId, 10) || 0;
+                        if (gid > 0 && ib.gameId !== gid) {
+                            this.$set(ib, 'gameId', gid);
+                        }
+                    }
                 }
                 if (statusMsg.success) {
                     this.buildGameStatusMap(statusMsg.obj);
@@ -585,6 +622,7 @@
                 this.dbInbounds.splice(0);
                 for (const inbound of dbInbounds) {
                     const dbInbound = new DBInbound(inbound);
+                    dbInbound.gameId = parseInt(dbInbound.gameId, 10) || 0;
                     this.inbounds.push(dbInbound.toInbound());
                     this.dbInbounds.push(dbInbound);
                 }
@@ -909,8 +947,7 @@
             }
         },
         mounted() {
-            this.loadSocksMap();
-            this.getDBInbounds();
+            this.loadSocksMap().then(() => this.getDBInbounds());
             this.loadSubInfo();
         },
         computed: {
