@@ -35,9 +35,9 @@ func (a *SocksProxyController) list(c *gin.Context) {
 
 func (a *SocksProxyController) importText(c *gin.Context) {
 	req := struct {
-		Text string `json:"text"`
+		Text string `form:"text" json:"text"`
 	}{}
-	if err := c.ShouldBindJSON(&req); err != nil {
+	if err := c.ShouldBind(&req); err != nil {
 		jsonMsg(c, "导入", err)
 		return
 	}
@@ -52,9 +52,9 @@ func (a *SocksProxyController) importText(c *gin.Context) {
 
 func (a *SocksProxyController) del(c *gin.Context) {
 	req := struct {
-		Ids []int `json:"ids"`
+		Ids []int `form:"ids" json:"ids"`
 	}{}
-	if err := c.ShouldBindJSON(&req); err != nil {
+	if err := c.ShouldBind(&req); err != nil {
 		jsonMsg(c, "删除", err)
 		return
 	}
