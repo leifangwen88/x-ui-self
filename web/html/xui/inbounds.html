@@ -24,6 +24,15 @@
     .socks-cell .socks-remark {
         margin-top: 4px;
     }
+
+    .inbound-filter-bar {
+        margin-top: 12px;
+        margin-bottom: 4px;
+    }
+
+    .inbound-filter-bar .ant-form-item {
+        margin-bottom: 8px;
+    }
 </style>
 <body>
 <a-layout id="app" v-cloak>
@@ -126,14 +135,37 @@
                                 </a-button>
                             </a-space>
                         </template>
-<!--                        <a-input v-model="searchKey" placeholder="搜索" autofocus style="max-width: 300px"></a-input>-->
+                        <div class="inbound-filter-bar">
+                            <a-form layout="inline">
+                                <a-form-item label="游戏">
+                                    <a-select v-model="filterGameId" style="width: 150px;" @change="onInboundFilterChange">
+                                        <a-select-option :value="0">全部游戏</a-select-option>
+                                        <a-select-option :value="-1">未指定游戏</a-select-option>
+                                        <a-select-option v-for="g in games" :key="g.id" :value="g.id">
+                                            [[ g.name ]][[ g.enable ? '' : ' (停用)' ]]
+                                        </a-select-option>
+                                    </a-select>
+                                </a-form-item>
+                                <a-form-item label="搜索">
+                                    <a-input v-model.trim="searchKey" allow-clear placeholder="备注 / 端口 / 协议"
+                                             style="width: 200px;" @change="onInboundFilterChange"></a-input>
+                                </a-form-item>
+                                <a-form-item label="每页">
+                                    <a-select v-model="pageSize" style="width: 90px;" @change="onInboundPageSizeSelect">
+                                        <a-select-option :value="10">10</a-select-option>
+                                        <a-select-option :value="20">20</a-select-option>
+                                        <a-select-option :value="50">50</a-select-option>
+                                        <a-select-option :value="100">100</a-select-option>
+                                    </a-select>
+                                </a-form-item>
+                            </a-form>
+                        </div>
                         <a-table :columns="columns" :row-key="dbInbound => dbInbound.id"
-                                 :data-source="dbInbounds"
+                                 :data-source="pagedDbInbounds"
                                  :loading="spinning" :scroll="{ x: 1600 }"
                                  :pagination="false"
                                  :row-selection="{ selectedRowKeys: selectedRowKeys, onChange: onInboundSelectChange }"
-                                 style="margin-top: 20px"
-                                 @change="() => getDBInbounds()">
+                                 style="margin-top: 12px">
                             <template slot="action" slot-scope="text, dbInbound">
                                 <a-dropdown :trigger="['click']">
                                     <a @click="e => e.preventDefault()">操作</a>
@@ -224,11 +256,11 @@
                             <template slot="settings" slot-scope="text, dbInbound">
                                 <a-button type="link" @click="showInfo(dbInbound)">查看</a-button>
                             </template>
-                            <template slot="stream" slot-scope="text, dbInbound, index">
-                                <template v-if="dbInbound.isVMess || dbInbound.isVLess || dbInbound.isTrojan || dbInbound.isSS">
-                                    <a-tag color="green">[[ inbounds[index].stream.network ]]</a-tag>
-                                    <a-tag v-if="inbounds[index].stream.isTls" color="blue">tls</a-tag>
-                                    <a-tag v-if="inbounds[index].stream.isXTls" color="blue">xtls</a-tag>
+                            <template slot="stream" slot-scope="text, dbInbound">
+                                <template v-if="streamInbound(dbInbound)">
+                                    <a-tag color="green">[[ streamInbound(dbInbound).stream.network ]]</a-tag>
+                                    <a-tag v-if="streamInbound(dbInbound).stream.isTls" color="blue">tls</a-tag>
+                                    <a-tag v-if="streamInbound(dbInbound).stream.isXTls" color="blue">xtls</a-tag>
                                 </template>
                                 <template v-else>无</template>
                             </template>
@@ -247,6 +279,12 @@
                                 <a-tag v-else color="green">无限期</a-tag>
                             </template>
                         </a-table>
+                        <div style="margin-top: 12px; text-align: right;">
+                            <a-pagination :current="page" :page-size="pageSize" :total="filteredDbInbounds.length"
+                                          :show-total="inboundPageTotalText"
+                                          show-size-changer :page-size-options="['10','20','50','100']"
+                                          @change="onPageChange" @showSizeChange="onPageSizeChange"/>
+                        </div>
                     </a-card>
                 </transition>
             </a-spin>
@@ -361,6 +399,9 @@
             inbounds: [],
             dbInbounds: [],
             searchKey: '',
+            filterGameId: 0,
+            page: 1,
+            pageSize: 20,
             socksMap: {},
             socksList: [],
             socksRemarkCache: {},
@@ -531,7 +572,7 @@
             },
             normalizeDbInboundGameIds() {
                 for (const ib of this.dbInbounds) {
-                    const gid = DBInbound.normalizeGameId(ib);
+                    const gid = normalizeInboundGameId(ib);
                     if (ib.gameId !== gid) {
                         this.$set(ib, 'gameId', gid);
                     }
@@ -539,26 +580,32 @@
             },
             async loadPageData() {
                 this.loading();
-                const [socksMsg, gameMsg, statusMsg, inboundMsg] = await Promise.all([
-                    HttpUtil.post('/xui/socks/list'),
-                    HttpUtil.post('/xui/game/list'),
-                    HttpUtil.post('/xui/socks/gameStatuses'),
-                    HttpUtil.post('/xui/inbound/list'),
-                ]);
-                if (gameMsg.success) {
-                    this.games = gameMsg.obj || [];
+                try {
+                    const [socksMsg, gameMsg, statusMsg, inboundMsg] = await Promise.all([
+                        HttpUtil.post('/xui/socks/list'),
+                        HttpUtil.post('/xui/game/list'),
+                        HttpUtil.post('/xui/socks/gameStatuses'),
+                        HttpUtil.post('/xui/inbound/list'),
+                    ]);
+                    if (gameMsg.success) {
+                        this.games = gameMsg.obj || [];
+                    }
+                    if (statusMsg.success) {
+                        this.buildGameStatusMap(statusMsg.obj);
+                    }
+                    if (socksMsg.success) {
+                        this.applySocksList(socksMsg.obj);
+                    }
+                    if (inboundMsg.success) {
+                        this.setInbounds(inboundMsg.obj);
+                    }
+                    this.normalizeDbInboundGameIds();
+                } catch (e) {
+                    console.error(e);
+                    this.$message.error('加载入站列表失败: ' + e);
+                } finally {
+                    this.loading(false);
                 }
-                if (statusMsg.success) {
-                    this.buildGameStatusMap(statusMsg.obj);
-                }
-                if (socksMsg.success) {
-                    this.applySocksList(socksMsg.obj);
-                }
-                if (inboundMsg.success) {
-                    this.setInbounds(inboundMsg.obj);
-                }
-                this.normalizeDbInboundGameIds();
-                this.loading(false);
             },
             async loadSocksMap() {
                 const [socksMsg, gameMsg, statusMsg] = await Promise.all([
@@ -615,6 +662,50 @@
             onInboundSelectChange(keys) {
                 this.selectedRowKeys = keys;
             },
+            onInboundFilterChange() {
+                this.page = 1;
+                this.selectedRowKeys = [];
+            },
+            onPageChange(page) {
+                this.page = page;
+            },
+            onPageSizeChange(current, size) {
+                this.pageSize = size;
+                this.page = 1;
+                this.selectedRowKeys = [];
+            },
+            onInboundPageSizeSelect(size) {
+                this.pageSize = size;
+                this.page = 1;
+                this.selectedRowKeys = [];
+            },
+            inboundPageTotalText(total) {
+                const all = this.dbInbounds.length;
+                if (this.filterGameId !== 0 || (this.searchKey || '').trim()) {
+                    return `共 ${total} 条（全部 ${all} 条）`;
+                }
+                return `共 ${total} 条`;
+            },
+            streamInbound(dbInbound) {
+                if (!dbInbound) {
+                    return null;
+                }
+                if (!(dbInbound.isVMess || dbInbound.isVLess || dbInbound.isTrojan || dbInbound.isSS)) {
+                    return null;
+                }
+                const idx = this.dbInbounds.findIndex(x => x.id === dbInbound.id);
+                return idx >= 0 ? this.inbounds[idx] : null;
+            },
+            matchesGameFilter(dbInbound) {
+                const gid = this.gameSelectValue(dbInbound);
+                if (this.filterGameId === -1) {
+                    return gid === 0;
+                }
+                if (this.filterGameId > 0) {
+                    return gid === this.filterGameId;
+                }
+                return true;
+            },
             gameSelectValue(dbInbound) {
                 const id = Number(dbInbound.gameId);
                 return id > 0 ? id : 0;
@@ -654,13 +745,19 @@
             },
             async getDBInbounds() {
                 this.loading();
-                const msg = await HttpUtil.post('/xui/inbound/list');
-                this.loading(false);
-                if (!msg.success) {
-                    return;
+                try {
+                    const msg = await HttpUtil.post('/xui/inbound/list');
+                    if (!msg.success) {
+                        return;
+                    }
+                    this.setInbounds(msg.obj);
+                    this.normalizeDbInboundGameIds();
+                } catch (e) {
+                    console.error(e);
+                    this.$message.error('刷新入站列表失败: ' + e);
+                } finally {
+                    this.loading(false);
                 }
-                this.setInbounds(msg.obj);
-                this.normalizeDbInboundGameIds();
             },
             setInbounds(dbInbounds) {
                 this.inbounds.splice(0);
@@ -670,17 +767,13 @@
                     this.inbounds.push(dbInbound.toInbound());
                     this.dbInbounds.push(dbInbound);
                 }
+                this.$nextTick(() => this.clampInboundPage());
             },
-            searchInbounds(key) {
-                if (ObjectUtil.isEmpty(key)) {
-                    this.searchedInbounds = this.dbInbounds.slice();
-                } else {
-                    this.searchedInbounds.splice(0, this.searchedInbounds.length);
-                    this.dbInbounds.forEach(inbound => {
-                        if (ObjectUtil.deepSearch(inbound, key)) {
-                            this.searchedInbounds.push(inbound);
-                        }
-                    });
+            clampInboundPage() {
+                const total = this.filteredDbInbounds.length;
+                const maxPage = Math.max(1, Math.ceil(total / this.pageSize) || 1);
+                if (this.page > maxPage) {
+                    this.page = maxPage;
                 }
             },
             clickAction(action, dbInbound) {
@@ -907,43 +1000,37 @@
                     },
                 });
             },
-            exportScopeHint() {
-                const n = this.selectedRowKeys.length;
-                return n > 0 ? `已勾选 ${n} 条` : '全部已启用入站';
-            },
             onBatchExportMenu(action) {
                 const key = action.key;
-                const selected = this.selectedRowKeys.slice();
                 if (key === 'links') {
-                    this.batchExportLinks(selected);
+                    this.batchExportLinks();
                 } else if (key === 'subscribe') {
-                    this.batchExportSubscribe(selected);
+                    this.batchExportSubscribe();
                 } else if (key === 'clash') {
-                    this.batchExportClash(selected);
+                    this.batchExportClash();
                 }
             },
-            batchExportLinks(selectedIds) {
-                const lines = ExportUtil.genShareLinks(this.dbInbounds, selectedIds);
+            batchExportLinks() {
+                const lines = ExportUtil.genShareLinks(this.dbInbounds);
                 if (lines.length === 0) {
                     this.$message.warning('没有可导出的分享链接（需已启用且支持 vmess/vless/trojan/ss）');
                     return;
                 }
-                const scope = this.exportScopeHint();
                 txtModal.show(
-                    `分享链接（${lines.length} 条，${scope}）`,
+                    `分享链接（${lines.length} 条，全部已启用入站）`,
                     lines.join('\r\n'),
                     'inbounds-links.txt'
                 );
             },
-            batchExportSubscribe(selectedIds) {
-                const b64 = ExportUtil.genSubscriptionBase64(this.dbInbounds, selectedIds);
+            batchExportSubscribe() {
+                const b64 = ExportUtil.genSubscriptionBase64(this.dbInbounds);
                 if (!b64) {
                     this.$message.warning('没有可导出的订阅内容');
                     return;
                 }
-                const links = ExportUtil.genShareLinks(this.dbInbounds, selectedIds);
+                const links = ExportUtil.genShareLinks(this.dbInbounds);
                 const body = ExportUtil.subscriptionHint(basePath)
-                    + '\n共 ' + links.length + ' 条节点（' + this.exportScopeHint() + '）\n\n'
+                    + '\n共 ' + links.length + ' 条节点（全部已启用入站）\n\n'
                     + b64;
                 txtModal.show(
                     `订阅 Base64（${links.length} 条）`,
@@ -951,13 +1038,13 @@
                     'subscription-base64.txt'
                 );
             },
-            batchExportClash(selectedIds) {
-                const result = ExportUtil.genClashYaml(this.dbInbounds, selectedIds);
+            batchExportClash() {
+                const result = ExportUtil.genClashYaml(this.dbInbounds);
                 if (!result.count) {
                     this.$message.warning('没有可导出为 Clash 的入站');
                     return;
                 }
-                let note = '# 共 ' + result.count + ' 个节点（' + this.exportScopeHint() + '）\n';
+                let note = '# 共 ' + result.count + ' 个节点（全部已启用入站）\n';
                 if (result.skipped.length) {
                     note += '# 以下入站未纳入（协议不支持或配置异常）：' + result.skipped.join('、') + '\n\n';
                 }
@@ -986,9 +1073,9 @@
             },
         },
         watch: {
-            searchKey(value) {
-                this.searchInbounds(value);
-            }
+            searchKey() {
+                this.onInboundFilterChange();
+            },
         },
         mounted() {
             this.loadPageData();
@@ -1010,6 +1097,21 @@
             },
             enabledGames() {
                 return (this.games || []).filter(g => g.enable);
+            },
+            filteredDbInbounds() {
+                let list = this.dbInbounds.slice();
+                if (this.filterGameId !== 0) {
+                    list = list.filter(ib => this.matchesGameFilter(ib));
+                }
+                const key = (this.searchKey || '').trim();
+                if (key) {
+                    list = list.filter(ib => ObjectUtil.deepSearch(ib, key));
+                }
+                return list;
+            },
+            pagedDbInbounds() {
+                const start = (this.page - 1) * this.pageSize;
+                return this.filteredDbInbounds.slice(start, start + this.pageSize);
             },
             total() {
                 let down = 0, up = 0;

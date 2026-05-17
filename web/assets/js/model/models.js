@@ -25,6 +25,14 @@ class Msg {
     }
 }
 
+function normalizeInboundGameId(data) {
+    if (data == null) {
+        return 0;
+    }
+    const raw = data.gameId != null ? data.gameId : data.game_id;
+    return parseInt(raw, 10) || 0;
+}
+
 class DBInbound {
 
     constructor(data) {
@@ -54,16 +62,8 @@ class DBInbound {
             return;
         }
         ObjectUtil.cloneProps(this, data);
-        this.gameId = DBInbound.normalizeGameId(data);
+        this.gameId = normalizeInboundGameId(data);
         this.socksProxyId = parseInt(this.socksProxyId, 10) || 0;
-    }
-
-    static normalizeGameId(data) {
-        if (data == null) {
-            return 0;
-        }
-        const raw = data.gameId != null ? data.gameId : data.game_id;
-        return parseInt(raw, 10) || 0;
     }
 
     get totalGB() {

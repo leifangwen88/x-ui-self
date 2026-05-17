@@ -1,0 +1,2 @@
+# Keep helper scripts stable on Windows (encoding / line endings)
+*.ps1 text eol=crlf working-tree-encoding=UTF-8

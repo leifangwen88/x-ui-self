@@ -3,13 +3,9 @@
  */
 class ExportUtil {
 
-    static collect(dbInbounds, selectedIds) {
-        let list = (dbInbounds || []).filter(ib => ib.enable && ib.hasLink());
-        if (selectedIds && selectedIds.length > 0) {
-            const set = new Set(selectedIds);
-            list = list.filter(ib => set.has(ib.id));
-        }
-        return list;
+    /** 批量导出：全部已启用且支持链接的入站（与列表勾选无关） */
+    static collect(dbInbounds) {
+        return (dbInbounds || []).filter(ib => ib.enable && ib.hasLink());
     }
 
     static proxyName(dbInbound) {
@@ -26,13 +22,13 @@ class ExportUtil {
         return address;
     }
 
-    static genShareLinks(dbInbounds, selectedIds) {
-        return this.collect(dbInbounds, selectedIds).map(ib => ib.genLink());
+    static genShareLinks(dbInbounds) {
+        return this.collect(dbInbounds).map(ib => ib.genLink());
     }
 
     /** 小火箭 / Surge / QX 等常用的 Base64 订阅正文 */
-    static genSubscriptionBase64(dbInbounds, selectedIds) {
-        const links = this.genShareLinks(dbInbounds, selectedIds);
+    static genSubscriptionBase64(dbInbounds) {
+        const links = this.genShareLinks(dbInbounds);
         if (links.length === 0) {
             return '';
         }
@@ -206,8 +202,8 @@ class ExportUtil {
         return lines;
     }
 
-    static genClashYaml(dbInbounds, selectedIds) {
-        const list = this.collect(dbInbounds, selectedIds);
+    static genClashYaml(dbInbounds) {
+        const list = this.collect(dbInbounds);
         const names = [];
         const skipped = [];
         const proxyYaml = [];

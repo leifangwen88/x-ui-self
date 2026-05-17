@@ -84,6 +84,42 @@
                                 <setting-list-item type="text" title="时区" desc="定时任务按照该时区的时间运行，重启面板生效" v-model="allSetting.timeLocation"></setting-list-item>
                             </a-list>
                         </a-tab-pane>
+                        <a-tab-pane key="6" tab="迁移备份">
+                            <a-card style="background:#fff;" :bordered="false">
+                                <p style="color:#666;margin-bottom:16px;">
+                                    换服务器时导出完整 JSON 备份，在新面板导入即可恢复：
+                                    <b>游戏、SOCKS 池、入站、入站-SOCKS 绑定、游戏 IP 标记、面板设置、Xray 模板（含出站与路由）</b>。
+                                    不导出面板登录密钥 <code>secret</code> 与管理员密码；导入为<b>覆盖</b>现有业务数据。
+                                </p>
+                                <a-space direction="vertical" style="width:100%;">
+                                    <a-button type="primary" icon="download" :loading="backupExporting" @click="exportPanelBackup">
+                                        导出备份 JSON
+                                    </a-button>
+                                    <a-divider style="margin:12px 0;">导入</a-divider>
+                                    <input ref="backupFileInput" type="file" accept=".json,application/json" style="display:none;"
+                                           @change="onBackupFileSelected">
+                                    <a-space wrap>
+                                        <a-button @click="pickBackupFile">选择备份文件</a-button>
+                                        <span v-if="backupFileName" style="color:#666;">[[ backupFileName ]]</span>
+                                    </a-space>
+                                    <a-checkbox v-model="backupResetTraffic">导入时清零入站流量统计</a-checkbox>
+                                    <a-alert v-if="backupPreview" type="info" show-icon style="margin-top:8px;">
+                                        <template slot="message">
+                                            备份预览（版本 [[ backupPreview.appVersion || '-' ]]）
+                                        </template>
+                                        <template slot="description">
+                                            游戏 [[ backupPreview.gameCount ]] · SOCKS [[ backupPreview.socksCount ]] ·
+                                            入站 [[ backupPreview.inboundCount ]] · IP 标记 [[ backupPreview.gameMarkCount ]]
+                                            <span v-if="backupPreview.hasXrayTemplate"> · 含 Xray 模板</span>
+                                        </template>
+                                    </a-alert>
+                                    <a-button type="danger" :disabled="!backupJson" :loading="backupImporting"
+                                              @click="importPanelBackup">
+                                        覆盖导入（需确认）
+                                    </a-button>
+                                </a-space>
+                            </a-card>
+                        </a-tab-pane>
                     </a-tabs>
                 </a-space>
             </a-spin>
@@ -104,6 +140,12 @@
             allSetting: new AllSetting(),
             saveBtnDisable: true,
             user: {},
+            backupExporting: false,
+            backupImporting: false,
+            backupJson: '',
+            backupFileName: '',
+            backupPreview: null,
+            backupResetTraffic: true,
         },
         methods: {
             loading(spinning = true) {
@@ -134,6 +176,91 @@
                 if (msg.success) {
                     this.user = {};
                 }
+            },
+            async exportPanelBackup() {
+                this.backupExporting = true;
+                try {
+                    const resp = await axios.post('/xui/backup/export', {}, { responseType: 'blob' });
+                    const blob = new Blob([resp.data], { type: 'application/json;charset=utf-8' });
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    const cd = resp.headers['content-disposition'] || '';
+                    let name = 'x-ui-backup.json';
+                    const m = /filename=([^;]+)/i.exec(cd);
+                    if (m) {
+                        name = m[1].trim().replace(/^["']|["']$/g, '');
+                    }
+                    a.href = url;
+                    a.download = name;
+                    document.body.appendChild(a);
+                    a.click();
+                    document.body.removeChild(a);
+                    URL.revokeObjectURL(url);
+                    this.$message.success('备份已下载');
+                } catch (e) {
+                    this.$message.error('导出失败: ' + e);
+                } finally {
+                    this.backupExporting = false;
+                }
+            },
+            pickBackupFile() {
+                this.$refs.backupFileInput.click();
+            },
+            async onBackupFileSelected(e) {
+                const file = e.target.files && e.target.files[0];
+                e.target.value = '';
+                if (!file) {
+                    return;
+                }
+                this.backupFileName = file.name;
+                try {
+                    this.backupJson = await file.text();
+                    const msg = await HttpUtil.post('/xui/backup/preview', { backupJson: this.backupJson });
+                    if (msg.success) {
+                        this.backupPreview = msg.obj;
+                    } else {
+                        this.backupPreview = null;
+                        this.backupJson = '';
+                    }
+                } catch (err) {
+                    this.backupPreview = null;
+                    this.backupJson = '';
+                    this.$message.error('读取备份失败: ' + err);
+                }
+            },
+            importPanelBackup() {
+                if (!this.backupJson) {
+                    this.$message.warning('请先选择备份文件');
+                    return;
+                }
+                this.$confirm({
+                    title: '覆盖导入备份',
+                    content: '将清空当前游戏、SOCKS、入站、IP 标记并写入备份内容；面板设置（除 secret）会被覆盖。此操作不可撤销，确定继续？',
+                    okText: '覆盖导入',
+                    okType: 'danger',
+                    cancelText: '取消',
+                    onOk: async () => {
+                        this.backupImporting = true;
+                        try {
+                            const msg = await HttpUtil.post('/xui/backup/import', {
+                                backupJson: this.backupJson,
+                                resetTraffic: this.backupResetTraffic,
+                                confirm: 'IMPORT',
+                            });
+                            if (msg.success && msg.obj) {
+                                const r = msg.obj;
+                                this.$message.success(
+                                    `导入完成：游戏 ${r.gamesCreated}，SOCKS ${r.socksCreated}，入站 ${r.inboundsCreated}，标记 ${r.gameMarksCreated}`
+                                );
+                                this.backupJson = '';
+                                this.backupFileName = '';
+                                this.backupPreview = null;
+                            }
+                        } finally {
+                            this.backupImporting = false;
+                        }
+                    },
+                });
             },
             async restartPanel() {
                 await new Promise(resolve => {
