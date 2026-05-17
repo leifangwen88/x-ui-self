@@ -44,6 +44,7 @@ class DBInbound {
         this.streamSettings = "";
         this.tag = "";
         this.sniffing = "";
+        this.socksProxyId = 0;
 
         if (data == null) {
             return;

@@ -59,6 +59,7 @@
             inModal: inModal,
             Protocols: protocols,
             SSMethods: SSMethods,
+            socksProxies: [],
             get inbound() {
                 return inModal.inbound;
             },
@@ -71,8 +72,21 @@
                 if (oldValue === 'kcp') {
                     this.inModal.inbound.tls = false;
                 }
-            }
-        }
+            },
+            async loadSocksProxies() {
+                const msg = await HttpUtil.post('/xui/socks/list');
+                if (msg.success) {
+                    this.socksProxies = msg.obj || [];
+                }
+            },
+        },
+        watch: {
+            'inModal.visible'(visible) {
+                if (visible) {
+                    this.loadSocksProxies();
+                }
+            },
+        },
     });
 
 </script>

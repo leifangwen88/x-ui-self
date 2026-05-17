@@ -41,6 +41,17 @@ type Inbound struct {
 	StreamSettings string   `json:"streamSettings" form:"streamSettings"`
 	Tag            string   `json:"tag" form:"tag" gorm:"unique"`
 	Sniffing       string   `json:"sniffing" form:"sniffing"`
+	SocksProxyId   int      `json:"socksProxyId" form:"socksProxyId" gorm:"default:0"`
+}
+
+type SocksProxy struct {
+	Id       int    `json:"id" gorm:"primaryKey;autoIncrement"`
+	Address  string `json:"address" gorm:"index:idx_socks_addr_port,unique"`
+	Port     int    `json:"port" gorm:"index:idx_socks_addr_port,unique"`
+	Username string `json:"username"`
+	Password string `json:"password"`
+	Enable   bool   `json:"enable" gorm:"default:true"`
+	Remark   string `json:"remark"`
 }
 
 func (i *Inbound) GenXrayInboundConfig() *xray.InboundConfig {

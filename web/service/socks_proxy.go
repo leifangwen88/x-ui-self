@@ -1,0 +1,112 @@
+package service
+
+import (
+	"strings"
+	"x-ui/database"
+	"x-ui/database/model"
+	"x-ui/util/common"
+
+	"gorm.io/gorm"
+)
+
+type SocksProxyService struct{}
+
+type SocksImportResult struct {
+	Imported int      `json:"imported"`
+	Skipped  int      `json:"skipped"`
+	Errors   []string `json:"errors"`
+}
+
+func (s *SocksProxyService) GetAll() ([]*model.SocksProxy, error) {
+	db := database.GetDB()
+	var list []*model.SocksProxy
+	err := db.Model(model.SocksProxy{}).Order("id asc").Find(&list).Error
+	if err != nil && err != gorm.ErrRecordNotFound {
+		return nil, err
+	}
+	return list, nil
+}
+
+func (s *SocksProxyService) GetById(id int) (*model.SocksProxy, error) {
+	db := database.GetDB()
+	socks := &model.SocksProxy{}
+	err := db.First(socks, id).Error
+	if err != nil {
+		return nil, err
+	}
+	return socks, nil
+}
+
+func (s *SocksProxyService) GetMapByIds(ids []int) (map[int]*model.SocksProxy, error) {
+	result := make(map[int]*model.SocksProxy)
+	if len(ids) == 0 {
+		return result, nil
+	}
+	db := database.GetDB()
+	var list []*model.SocksProxy
+	err := db.Where("id IN ?", ids).Find(&list).Error
+	if err != nil {
+		return nil, err
+	}
+	for _, item := range list {
+		result[item.Id] = item
+	}
+	return result, nil
+}
+
+func (s *SocksProxyService) ImportFromText(text string) (*SocksImportResult, error) {
+	lines := strings.Split(text, "\n")
+	result := &SocksImportResult{}
+	db := database.GetDB()
+
+	for _, line := range lines {
+		socks, err := parseSocksProxyLine(line)
+		if err != nil {
+			result.Errors = append(result.Errors, err.Error())
+			continue
+		}
+		if socks == nil {
+			continue
+		}
+
+		var exist model.SocksProxy
+		err = db.Where("address = ? AND port = ?", socks.Address, socks.Port).First(&exist).Error
+		if err == nil {
+			result.Skipped++
+			continue
+		}
+		if err != nil && err != gorm.ErrRecordNotFound {
+			return nil, err
+		}
+
+		err = db.Create(socks).Error
+		if err != nil {
+			result.Errors = append(result.Errors, err.Error())
+			continue
+		}
+		result.Imported++
+	}
+	return result, nil
+}
+
+func (s *SocksProxyService) DeleteByIds(ids []int) error {
+	if len(ids) == 0 {
+		return common.NewError("未选择要删除的 SOCKS")
+	}
+	db := database.GetDB()
+	tx := db.Begin()
+	if err := tx.Model(model.Inbound{}).Where("socks_proxy_id IN ?", ids).Update("socks_proxy_id", 0).Error; err != nil {
+		tx.Rollback()
+		return err
+	}
+	if err := tx.Delete(&model.SocksProxy{}, ids).Error; err != nil {
+		tx.Rollback()
+		return err
+	}
+	return tx.Commit().Error
+}
+
+func (s *SocksProxyService) UpdateEnable(id int, enable bool) error {
+	db := database.GetDB()
+	return db.Model(model.SocksProxy{}).Where("id = ?", id).Update("enable", enable).Error
+}

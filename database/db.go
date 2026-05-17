@@ -37,6 +37,10 @@ func initInbound() error {
 	return db.AutoMigrate(&model.Inbound{})
 }
 
+func initSocksProxy() error {
+	return db.AutoMigrate(&model.SocksProxy{})
+}
+
 func initSetting() error {
 	return db.AutoMigrate(&model.Setting{})
 }
@@ -73,6 +77,10 @@ func InitDB(dbPath string) error {
 		return err
 	}
 	err = initSetting()
+	if err != nil {
+		return err
+	}
+	err = initSocksProxy()
 	if err != nil {
 		return err
 	}

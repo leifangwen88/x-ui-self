@@ -27,6 +27,14 @@
     <a-form-item label="端口">
         <a-input type="number" v-model.number="inbound.port"></a-input>
     </a-form-item>
+    <a-form-item label="SOCKS5 出站">
+        <a-select v-model="dbInbound.socksProxyId" style="width: 420px;" placeholder="选择 SOCKS5（不绑定则不走代理池）">
+            <a-select-option :value="0">不绑定</a-select-option>
+            <a-select-option v-for="s in socksProxies" :key="s.id" :value="s.id" v-if="s.enable">
+                [[ s.address ]]:[[ s.port ]] — [[ s.username ]] (#[[ s.id ]])
+            </a-select-option>
+        </a-select>
+    </a-form-item>
     <a-form-item>
         <span slot="label">
             总流量(GB)

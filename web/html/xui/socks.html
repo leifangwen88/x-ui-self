@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="en">
+{{template "head" .}}
+<style>
+    @media (min-width: 769px) {
+        .ant-layout-content {
+            margin: 24px 16px;
+        }
+    }
+    .import-area {
+        font-family: Consolas, monospace;
+    }
+</style>
+<body>
+<a-layout id="app" v-cloak>
+    {{ template "commonSider" . }}
+    <a-layout id="content-layout">
+        <a-layout-content>
+            <a-spin :spinning="spinning" :delay="300" tip="loading">
+                <a-card title="批量录入 SOCKS5" style="margin-bottom: 16px;">
+                    <p style="color:#666;margin-bottom:8px;">每行一条，格式：<code>服务器:端口:账号:密码</code></p>
+                    <a-textarea class="import-area" v-model="importText" :rows="8"
+                                placeholder="104.165.79.83:7243:user:pass"></a-textarea>
+                    <div style="margin-top: 12px;">
+                        <a-button type="primary" @click="importSocks" :loading="importing">批量导入</a-button>
+                    </div>
+                    <a-alert v-if="importResult" style="margin-top:12px;" type="info" show-icon>
+                        <template slot="message">
+                            成功 [[ importResult.imported ]] 条，跳过重复 [[ importResult.skipped ]] 条
+                            <div v-if="importResult.errors && importResult.errors.length" style="margin-top:8px;">
+                                <div v-for="(e,i) in importResult.errors" :key="i">[[ e ]]</div>
+                            </div>
+                        </template>
+                    </a-alert>
+                </a-card>
+
+                <a-card title="SOCKS5 列表">
+                    <template slot="extra">
+                        <a-button type="danger" :disabled="selectedRowKeys.length === 0" @click="deleteSelected">
+                            删除选中 ([[ selectedRowKeys.length ]])
+                        </a-button>
+                    </template>
+                    <a-table :columns="columns" :data-source="socksList" :row-key="r => r.id"
+                             :pagination="{ pageSize: 50 }" :loading="spinning"
+                             :row-selection="{ selectedRowKeys: selectedRowKeys, onChange: onSelectChange }">
+                        <template slot="endpoint" slot-scope="text, record">
+                            <a-tag color="blue">[[ record.address ]]:[[ record.port ]]</a-tag>
+                        </template>
+                        <template slot="auth" slot-scope="text, record">
+                            [[ record.username ]] / ****
+                        </template>
+                        <template slot="inbound" slot-scope="text, record">
+                            <template v-if="inboundMap[record.id] && inboundMap[record.id].length">
+                                <a-tag v-for="ib in inboundMap[record.id]" :key="ib.id" color="purple">
+                                    [[ ib.remark || ('端口 ' + ib.port) ]]
+                                </a-tag>
+                            </template>
+                            <span v-else style="color:#999;">未绑定入站</span>
+                        </template>
+                    </a-table>
+                </a-card>
+            </a-spin>
+        </a-layout-content>
+    </a-layout>
+</a-layout>
+{{template "js" .}}
+<script>
+    const columns = [{
+        title: 'ID',
+        dataIndex: 'id',
+        width: 60,
+    }, {
+        title: '地址',
+        scopedSlots: { customRender: 'endpoint' },
+        width: 200,
+    }, {
+        title: '账号',
+        scopedSlots: { customRender: 'auth' },
+        width: 160,
+    }, {
+        title: '绑定的入站',
+        scopedSlots: { customRender: 'inbound' },
+    }];
+
+    const app = new Vue({
+        delimiters: ['[[', ']]'],
+        el: '#app',
+        data: {
+            siderDrawer,
+            spinning: false,
+            importing: false,
+            importText: '',
+            importResult: null,
+            socksList: [],
+            selectedRowKeys: [],
+            inboundMap: {},
+        },
+        methods: {
+            loading(v = true) {
+                this.spinning = v;
+            },
+            onSelectChange(keys) {
+                this.selectedRowKeys = keys;
+            },
+            buildInboundMap(inbounds) {
+                const map = {};
+                for (const ib of inbounds) {
+                    if (!ib.socksProxyId) continue;
+                    if (!map[ib.socksProxyId]) map[ib.socksProxyId] = [];
+                    map[ib.socksProxyId].push(ib);
+                }
+                this.inboundMap = map;
+            },
+            async loadAll() {
+                this.loading(true);
+                const [socksMsg, inboundMsg] = await Promise.all([
+                    HttpUtil.post('/xui/socks/list'),
+                    HttpUtil.post('/xui/inbound/list'),
+                ]);
+                this.loading(false);
+                if (socksMsg.success) {
+                    this.socksList = socksMsg.obj || [];
+                }
+                if (inboundMsg.success) {
+                    this.buildInboundMap(inboundMsg.obj || []);
+                }
+            },
+            async importSocks() {
+                if (!this.importText.trim()) {
+                    return;
+                }
+                this.importing = true;
+                const msg = await HttpUtil.post('/xui/socks/import', { text: this.importText });
+                this.importing = false;
+                if (msg.success) {
+                    this.importResult = msg.obj;
+                    this.importText = '';
+                    await this.loadAll();
+                }
+            },
+            deleteSelected() {
+                this.$confirm({
+                    title: '删除 SOCKS5',
+                    content: `确定删除选中的 ${this.selectedRowKeys.length} 条？已绑定的入站将自动解绑。`,
+                    okText: '删除',
+                    okType: 'danger',
+                    cancelText: '取消',
+                    onOk: async () => {
+                        const msg = await HttpUtil.post('/xui/socks/del', { ids: this.selectedRowKeys });
+                        if (msg.success) {
+                            this.selectedRowKeys = [];
+                            await this.loadAll();
+                        }
+                    },
+                });
+            },
+        },
+        mounted() {
+            this.loadAll();
+        },
+    });
+</script>
+</body>
+</html>

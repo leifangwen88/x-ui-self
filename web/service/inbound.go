@@ -56,6 +56,9 @@ func (s *InboundService) AddInbound(inbound *model.Inbound) error {
 	if exist {
 		return common.NewError("端口已存在:", inbound.Port)
 	}
+	if err = s.checkSocksProxyId(inbound.SocksProxyId); err != nil {
+		return err
+	}
 	db := database.GetDB()
 	return db.Save(inbound).Error
 }
@@ -132,10 +135,26 @@ func (s *InboundService) UpdateInbound(inbound *model.Inbound) error {
 	oldInbound.Settings = inbound.Settings
 	oldInbound.StreamSettings = inbound.StreamSettings
 	oldInbound.Sniffing = inbound.Sniffing
+	if err = s.checkSocksProxyId(inbound.SocksProxyId); err != nil {
+		return err
+	}
+	oldInbound.SocksProxyId = inbound.SocksProxyId
 	oldInbound.Tag = fmt.Sprintf("inbound-%v", inbound.Port)
 
 	db := database.GetDB()
 	return db.Save(oldInbound).Error
+}
+
+func (s *InboundService) checkSocksProxyId(socksProxyId int) error {
+	if socksProxyId <= 0 {
+		return nil
+	}
+	socksService := SocksProxyService{}
+	_, err := socksService.GetById(socksProxyId)
+	if err != nil {
+		return common.NewError("SOCKS5 不存在:", socksProxyId)
+	}
+	return nil
 }
 
 func (s *InboundService) AddTraffic(traffics []*xray.Traffic) (err error) {

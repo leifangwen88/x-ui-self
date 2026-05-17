@@ -16,8 +16,9 @@ var isNeedXrayRestart atomic.Bool
 var result string
 
 type XrayService struct {
-	inboundService InboundService
-	settingService SettingService
+	inboundService   InboundService
+	settingService   SettingService
+	socksProxyService SocksProxyService
 }
 
 func (s *XrayService) IsXrayRunning() bool {
@@ -68,13 +69,50 @@ func (s *XrayService) GetXrayConfig() (*xray.Config, error) {
 	if err != nil {
 		return nil, err
 	}
+
+	socksIds := make([]int, 0)
+	for _, inbound := range inbounds {
+		if inbound.SocksProxyId > 0 {
+			socksIds = append(socksIds, inbound.SocksProxyId)
+		}
+	}
+	socksMap, err := s.socksProxyService.GetMapByIds(socksIds)
+	if err != nil {
+		return nil, err
+	}
+
+	bindings := make([]inboundSocksBinding, 0)
 	for _, inbound := range inbounds {
 		if !inbound.Enable {
 			continue
 		}
 		inboundConfig := inbound.GenXrayInboundConfig()
 		xrayConfig.InboundConfigs = append(xrayConfig.InboundConfigs, *inboundConfig)
+
+		if inbound.SocksProxyId <= 0 {
+			continue
+		}
+		socks := socksMap[inbound.SocksProxyId]
+		if socks == nil || !socks.Enable {
+			continue
+		}
+		bindings = append(bindings, inboundSocksBinding{
+			inboundTag: inbound.Tag,
+			socks:      socks,
+		})
 	}
+
+	outboundJSON, routingJSON, err := mergeSocksProxiesIntoConfig(
+		[]byte(xrayConfig.OutboundConfigs),
+		[]byte(xrayConfig.RouterConfig),
+		bindings,
+	)
+	if err != nil {
+		return nil, err
+	}
+	xrayConfig.OutboundConfigs = outboundJSON
+	xrayConfig.RouterConfig = routingJSON
+
 	return xrayConfig, nil
 }
 

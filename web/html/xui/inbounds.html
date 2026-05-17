@@ -77,6 +77,10 @@
                             <template slot="protocol" slot-scope="text, dbInbound">
                                 <a-tag color="blue">[[ dbInbound.protocol ]]</a-tag>
                             </template>
+                            <template slot="socks" slot-scope="text, dbInbound">
+                                <a-tag v-if="socksLabel(dbInbound)" color="purple">[[ socksLabel(dbInbound) ]]</a-tag>
+                                <span v-else style="color:#999;">未绑定</span>
+                            </template>
                             <template slot="traffic" slot-scope="text, dbInbound">
                                 <a-tag color="blue">[[ sizeFormat(dbInbound.up) ]] / [[ sizeFormat(dbInbound.down) ]]</a-tag>
                                 <template v-if="dbInbound.total > 0">
@@ -151,6 +155,11 @@
         dataIndex: "port",
         width: 60,
     }, {
+        title: "SOCKS5",
+        align: 'center',
+        width: 140,
+        scopedSlots: { customRender: 'socks' },
+    }, {
         title: "流量↑|↓",
         align: 'center',
         width: 150,
@@ -181,8 +190,27 @@
             inbounds: [],
             dbInbounds: [],
             searchKey: '',
+            socksMap: {},
         },
         methods: {
+            socksLabel(dbInbound) {
+                const s = this.socksMap[dbInbound.socksProxyId];
+                if (!s) {
+                    return '';
+                }
+                return `${s.address}:${s.port}`;
+            },
+            async loadSocksMap() {
+                const msg = await HttpUtil.post('/xui/socks/list');
+                if (!msg.success) {
+                    return;
+                }
+                const map = {};
+                for (const s of (msg.obj || [])) {
+                    map[s.id] = s;
+                }
+                this.socksMap = map;
+            },
             loading(spinning=true) {
                 this.spinning = spinning;
             },
@@ -272,6 +300,7 @@
                     settings: inbound.settings.toString(),
                     streamSettings: inbound.stream.toString(),
                     sniffing: inbound.canSniffing() ? inbound.sniffing.toString() : '{}',
+                    socksProxyId: dbInbound.socksProxyId || 0,
                 };
                 await this.submit('/xui/inbound/add', data, inModal);
             },
@@ -290,6 +319,7 @@
                     settings: inbound.settings.toString(),
                     streamSettings: inbound.stream.toString(),
                     sniffing: inbound.canSniffing() ? inbound.sniffing.toString() : '{}',
+                    socksProxyId: dbInbound.socksProxyId || 0,
                 };
                 await this.submit(`/xui/inbound/update/${dbInbound.id}`, data, inModal);
             },
@@ -339,6 +369,7 @@
             }
         },
         mounted() {
+            this.loadSocksMap();
             this.getDBInbounds();
         },
         computed: {
