@@ -185,6 +185,29 @@ func (s *InboundService) AddTraffic(traffics []*xray.Traffic) (err error) {
 	return
 }
 
+func (s *InboundService) UpdateSocksProxyId(id int, socksProxyId int) error {
+	if err := s.checkSocksProxyId(socksProxyId); err != nil {
+		return err
+	}
+	db := database.GetDB()
+	result := db.Model(model.Inbound{}).Where("id = ?", id).Update("socks_proxy_id", socksProxyId)
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return common.NewError("入站不存在:", id)
+	}
+	return nil
+}
+
+func (s *InboundService) ResetAllTraffic() error {
+	db := database.GetDB()
+	return db.Model(model.Inbound{}).Where("1 = 1").Updates(map[string]interface{}{
+		"up":   0,
+		"down": 0,
+	}).Error
+}
+
 func (s *InboundService) DisableInvalidInbounds() (int64, error) {
 	db := database.GetDB()
 	now := time.Now().Unix() * 1000

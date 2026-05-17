@@ -2,6 +2,7 @@ package service
 
 import (
 	"strings"
+	"time"
 	"x-ui/database"
 	"x-ui/database/model"
 	"x-ui/util/common"
@@ -54,10 +55,11 @@ func (s *SocksProxyService) GetMapByIds(ids []int) (map[int]*model.SocksProxy, e
 	return result, nil
 }
 
-func (s *SocksProxyService) ImportFromText(text string) (*SocksImportResult, error) {
+func (s *SocksProxyService) ImportFromText(text string, expiryTime int64) (*SocksImportResult, error) {
 	lines := strings.Split(text, "\n")
 	result := &SocksImportResult{}
 	db := database.GetDB()
+	now := time.Now().UnixMilli()
 
 	for _, line := range lines {
 		socks, err := parseSocksProxyLine(line)
@@ -68,6 +70,8 @@ func (s *SocksProxyService) ImportFromText(text string) (*SocksImportResult, err
 		if socks == nil {
 			continue
 		}
+		socks.CreatedAt = now
+		socks.ExpiryTime = expiryTime
 
 		var exist model.SocksProxy
 		err = db.Where("address = ? AND port = ?", socks.Address, socks.Port).First(&exist).Error
@@ -87,6 +91,13 @@ func (s *SocksProxyService) ImportFromText(text string) (*SocksImportResult, err
 		result.Imported++
 	}
 	return result, nil
+}
+
+func (s *SocksProxyService) IsExpired(socks *model.SocksProxy) bool {
+	if socks == nil || socks.ExpiryTime <= 0 {
+		return false
+	}
+	return socks.ExpiryTime < time.Now().UnixMilli()
 }
 
 func (s *SocksProxyService) DeleteByIds(ids []int) error {
@@ -109,4 +120,19 @@ func (s *SocksProxyService) DeleteByIds(ids []int) error {
 func (s *SocksProxyService) UpdateEnable(id int, enable bool) error {
 	db := database.GetDB()
 	return db.Model(model.SocksProxy{}).Where("id = ?", id).Update("enable", enable).Error
+}
+
+func (s *SocksProxyService) UpdateRemark(id int, remark string) error {
+	if id <= 0 {
+		return common.NewError("无效的 SOCKS ID")
+	}
+	db := database.GetDB()
+	result := db.Model(model.SocksProxy{}).Where("id = ?", id).Update("remark", remark)
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return common.NewError("SOCKS5 不存在:", id)
+	}
+	return nil
 }

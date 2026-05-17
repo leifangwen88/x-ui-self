@@ -45,13 +45,15 @@ type Inbound struct {
 }
 
 type SocksProxy struct {
-	Id       int    `json:"id" gorm:"primaryKey;autoIncrement"`
-	Address  string `json:"address" gorm:"index:idx_socks_addr_port,unique"`
-	Port     int    `json:"port" gorm:"index:idx_socks_addr_port,unique"`
-	Username string `json:"username"`
-	Password string `json:"password"`
-	Enable   bool   `json:"enable" gorm:"default:true"`
-	Remark   string `json:"remark"`
+	Id         int    `json:"id" gorm:"primaryKey;autoIncrement"`
+	Address    string `json:"address" gorm:"uniqueIndex:idx_socks_addr_port"`
+	Port       int    `json:"port" gorm:"uniqueIndex:idx_socks_addr_port"`
+	Username   string `json:"username"`
+	Password   string `json:"password"`
+	Enable     bool   `json:"enable" gorm:"default:true"`
+	Remark     string `json:"remark"`
+	CreatedAt  int64  `json:"createdAt" gorm:"index"`
+	ExpiryTime int64  `json:"expiryTime" gorm:"default:0"`
 }
 
 func (i *Inbound) GenXrayInboundConfig() *xray.InboundConfig {

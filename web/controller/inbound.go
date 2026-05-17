@@ -30,6 +30,8 @@ func (a *InboundController) initRouter(g *gin.RouterGroup) {
 	g.POST("/add", a.addInbound)
 	g.POST("/del/:id", a.delInbound)
 	g.POST("/update/:id", a.updateInbound)
+	g.POST("/resetAllTraffic", a.resetAllTraffic)
+	g.POST("/updateSocks/:id", a.updateSocks)
 }
 
 func (a *InboundController) startTask() {
@@ -84,6 +86,31 @@ func (a *InboundController) delInbound(c *gin.Context) {
 	if err == nil {
 		a.xrayService.SetToNeedRestart()
 	}
+}
+
+func (a *InboundController) updateSocks(c *gin.Context) {
+	id, err := strconv.Atoi(c.Param("id"))
+	if err != nil {
+		jsonMsg(c, "修改 SOCKS 绑定", err)
+		return
+	}
+	req := struct {
+		SocksProxyId int `form:"socksProxyId" json:"socksProxyId"`
+	}{}
+	if err := c.ShouldBind(&req); err != nil {
+		jsonMsg(c, "修改 SOCKS 绑定", err)
+		return
+	}
+	err = a.inboundService.UpdateSocksProxyId(id, req.SocksProxyId)
+	jsonMsg(c, "修改 SOCKS 绑定", err)
+	if err == nil {
+		a.xrayService.SetToNeedRestart()
+	}
+}
+
+func (a *InboundController) resetAllTraffic(c *gin.Context) {
+	err := a.inboundService.ResetAllTraffic()
+	jsonMsg(c, "批量重置流量", err)
 }
 
 func (a *InboundController) updateInbound(c *gin.Context) {

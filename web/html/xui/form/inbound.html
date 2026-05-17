@@ -31,7 +31,10 @@
         <a-select v-model="dbInbound.socksProxyId" style="width: 420px;" placeholder="选择 SOCKS5（不绑定则不走代理池）">
             <a-select-option :value="0">不绑定</a-select-option>
             <a-select-option v-for="s in socksProxies" :key="s.id" :value="s.id" v-if="s.enable">
-                [[ s.address ]]:[[ s.port ]] — [[ s.username ]] (#[[ s.id ]])
+                #[[ s.id ]] [[ s.address ]]:[[ s.port ]]
+                <template v-if="s.remark"> · [[ s.remark ]]</template>
+                <template v-if="s.expiryTime > 0"> · [[ DateUtil.formatMillis(s.expiryTime) ]]</template>
+                <template v-else> · 无期限</template>
             </a-select-option>
         </a-select>
     </a-form-item>

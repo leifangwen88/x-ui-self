@@ -11,6 +11,19 @@
     .ant-col-sm-24 {
         margin-top: 10px;
     }
+
+    .socks-cell {
+        min-width: 220px;
+        text-align: left;
+    }
+
+    .socks-cell .socks-meta {
+        margin-top: 6px;
+    }
+
+    .socks-cell .socks-remark {
+        margin-top: 4px;
+    }
 </style>
 <body>
 <a-layout id="app" v-cloak>
@@ -43,9 +56,14 @@
                 </transition>
                 <transition name="list" appear>
                     <a-card hoverable>
-                        <div slot="title">
-                            <a-button type="primary" icon="plus" @click="openAddInbound"></a-button>
-                        </div>
+                        <template slot="title">
+                            <a-space>
+                                <a-button type="primary" icon="plus" @click="openAddInbound"></a-button>
+                                <a-button @click="batchResetTraffic">批量重置</a-button>
+                                <a-button @click="batchExport">批量导出</a-button>
+                                <a-button @click="syncTemplateBindings">同步模板绑定</a-button>
+                            </a-space>
+                        </template>
 <!--                        <a-input v-model="searchKey" placeholder="搜索" autofocus style="max-width: 300px"></a-input>-->
                         <a-table :columns="columns" :row-key="dbInbound => dbInbound.id"
                                  :data-source="dbInbounds"
@@ -59,6 +77,9 @@
                                     <a-menu slot="overlay" @click="a => clickAction(a, dbInbound)">
                                         <a-menu-item v-if="dbInbound.hasLink()" key="qrcode">
                                             <a-icon type="qrcode"></a-icon>二维码
+                                        </a-menu-item>
+                                        <a-menu-item v-if="dbInbound.hasLink()" key="exportLink">
+                                            <a-icon type="copy"></a-icon>导出链接
                                         </a-menu-item>
                                         <a-menu-item key="edit">
                                             <a-icon type="edit"></a-icon>编辑
@@ -78,8 +99,37 @@
                                 <a-tag color="blue">[[ dbInbound.protocol ]]</a-tag>
                             </template>
                             <template slot="socks" slot-scope="text, dbInbound">
-                                <a-tag v-if="socksLabel(dbInbound)" color="purple">[[ socksLabel(dbInbound) ]]</a-tag>
-                                <span v-else style="color:#999;">未绑定</span>
+                                <div class="socks-cell">
+                                    <a-select :value="dbInbound.socksProxyId || 0"
+                                              placeholder="未绑定"
+                                              style="width: 100%;"
+                                              show-search
+                                              :filter-option="filterSocksOption"
+                                              @change="val => onSocksProxyChange(dbInbound, val)">
+                                        <a-select-option :value="0">未绑定</a-select-option>
+                                        <a-select-option v-for="s in socksList" :key="s.id" :value="s.id">
+                                            [[ socksOptionLabel(s) ]]
+                                        </a-select-option>
+                                    </a-select>
+                                    <template v-if="boundSocks(dbInbound)">
+                                        <div class="socks-meta">
+                                            <a-tag v-if="!boundSocks(dbInbound).expiryTime || boundSocks(dbInbound).expiryTime <= 0"
+                                                   color="green" style="margin:0;">SOCKS 无期限</a-tag>
+                                            <a-tag v-else-if="isSocksExpired(boundSocks(dbInbound))"
+                                                   color="red" style="margin:0;">
+                                                SOCKS 已到期 [[ formatSocksExpiry(boundSocks(dbInbound)) ]]
+                                            </a-tag>
+                                            <a-tag v-else color="blue" style="margin:0;">
+                                                SOCKS 到期 [[ formatSocksExpiry(boundSocks(dbInbound)) ]]
+                                            </a-tag>
+                                        </div>
+                                        <a-input class="socks-remark" size="small"
+                                                 v-model="socksMap[dbInbound.socksProxyId].remark"
+                                                 placeholder="SOCKS 备注"
+                                                 @blur="() => saveSocksRemark(socksMap[dbInbound.socksProxyId])"
+                                                 @pressEnter="() => saveSocksRemark(socksMap[dbInbound.socksProxyId])"></a-input>
+                                    </template>
+                                </div>
                             </template>
                             <template slot="traffic" slot-scope="text, dbInbound">
                                 <a-tag color="blue">[[ sizeFormat(dbInbound.up) ]] / [[ sizeFormat(dbInbound.down) ]]</a-tag>
@@ -157,7 +207,7 @@
     }, {
         title: "SOCKS5",
         align: 'center',
-        width: 140,
+        width: 280,
         scopedSlots: { customRender: 'socks' },
     }, {
         title: "流量↑|↓",
@@ -191,25 +241,93 @@
             dbInbounds: [],
             searchKey: '',
             socksMap: {},
+            socksList: [],
+            socksRemarkCache: {},
         },
         methods: {
-            socksLabel(dbInbound) {
-                const s = this.socksMap[dbInbound.socksProxyId];
-                if (!s) {
+            boundSocks(dbInbound) {
+                const id = dbInbound.socksProxyId;
+                if (!id) {
+                    return null;
+                }
+                return this.socksMap[id] || null;
+            },
+            isSocksExpired(s) {
+                return s && s.expiryTime > 0 && s.expiryTime < Date.now();
+            },
+            formatSocksExpiry(s) {
+                if (!s || !s.expiryTime) {
                     return '';
                 }
-                return `${s.address}:${s.port}`;
+                return DateUtil.formatMillis(s.expiryTime);
+            },
+            socksOptionLabel(s) {
+                const parts = [`#${s.id} ${s.address}:${s.port}`];
+                if (s.remark) {
+                    parts.push(s.remark);
+                }
+                if (s.expiryTime > 0) {
+                    parts.push(this.isSocksExpired(s) ? '已到期' : this.formatSocksExpiry(s));
+                } else {
+                    parts.push('无期限');
+                }
+                return parts.join(' · ');
+            },
+            filterSocksOption(input, option) {
+                const text = (option.componentOptions && option.componentOptions.children
+                    && option.componentOptions.children[0]
+                    && option.componentOptions.children[0].text) || '';
+                return text.toLowerCase().indexOf((input || '').toLowerCase()) >= 0;
             },
             async loadSocksMap() {
                 const msg = await HttpUtil.post('/xui/socks/list');
                 if (!msg.success) {
                     return;
                 }
+                const list = msg.obj || [];
                 const map = {};
-                for (const s of (msg.obj || [])) {
+                const cache = {};
+                for (const s of list) {
                     map[s.id] = s;
+                    cache[s.id] = s.remark || '';
                 }
                 this.socksMap = map;
+                this.socksList = list;
+                this.socksRemarkCache = cache;
+            },
+            async onSocksProxyChange(dbInbound, val) {
+                const socksProxyId = val == null ? 0 : val;
+                if (socksProxyId === (dbInbound.socksProxyId || 0)) {
+                    return;
+                }
+                const msg = await HttpUtil.post(`/xui/inbound/updateSocks/${dbInbound.id}`, {
+                    socksProxyId: socksProxyId,
+                });
+                if (msg.success) {
+                    dbInbound.socksProxyId = socksProxyId;
+                    this.$message.success(socksProxyId ? 'SOCKS 绑定已更新' : '已解除 SOCKS 绑定');
+                }
+            },
+            async saveSocksRemark(socks) {
+                if (!socks) {
+                    return;
+                }
+                const remark = (socks.remark || '').trim();
+                const prev = this.socksRemarkCache[socks.id] || '';
+                if (remark === prev) {
+                    return;
+                }
+                const msg = await HttpUtil.post('/xui/socks/updateRemark', {
+                    id: socks.id,
+                    remark: remark,
+                });
+                if (msg.success) {
+                    this.socksRemarkCache[socks.id] = remark;
+                    socks.remark = remark;
+                    this.$message.success('SOCKS 备注已保存');
+                } else {
+                    socks.remark = prev;
+                }
             },
             loading(spinning=true) {
                 this.spinning = spinning;
@@ -248,6 +366,9 @@
                 switch (action.key) {
                     case "qrcode":
                         this.showQrcode(dbInbound);
+                        break;
+                    case "exportLink":
+                        this.exportInboundLink(dbInbound);
                         break;
                     case "edit":
                         this.openEditInbound(dbInbound);
@@ -350,11 +471,62 @@
                 const link = dbInbound.genLink();
                 qrModal.show('二维码', link);
             },
+            exportInboundLink(dbInbound) {
+                if (!dbInbound.hasLink()) {
+                    this.$message.warning('该入站不支持分享链接');
+                    return;
+                }
+                const link = dbInbound.genLink();
+                const name = (dbInbound.remark || ('inbound-' + dbInbound.port)).replace(/[\\/:*?"<>|]/g, '_');
+                txtModal.show('导出链接 - ' + (dbInbound.remark || dbInbound.port), link, name + '.txt');
+            },
             showInfo(dbInbound) {
                 infoModal.show(dbInbound);
             },
             switchEnable(dbInbound) {
-                this.submit(`/xui/inbound/update/${dbInbound.id}`, dbInbound);
+                const data = Object.assign({}, dbInbound, {
+                    socksProxyId: dbInbound.socksProxyId || 0,
+                });
+                this.submit(`/xui/inbound/update/${dbInbound.id}`, data);
+            },
+            batchResetTraffic() {
+                this.$confirm({
+                    title: '批量重置流量',
+                    content: '确定重置所有入站的流量统计吗？',
+                    okText: '重置',
+                    cancelText: '取消',
+                    onOk: async () => {
+                        const msg = await HttpUtil.post('/xui/inbound/resetAllTraffic');
+                        if (msg.success) {
+                            await this.getDBInbounds();
+                        }
+                    },
+                });
+            },
+            batchExport() {
+                const lines = [];
+                for (const dbInbound of this.dbInbounds) {
+                    if (!dbInbound.enable || !dbInbound.hasLink()) {
+                        continue;
+                    }
+                    lines.push(dbInbound.genLink());
+                }
+                if (lines.length === 0) {
+                    this.$message.warning('没有可导出的分享链接（仅导出已启用且支持链接的入站）');
+                    return;
+                }
+                txtModal.show('批量导出（共 ' + lines.length + ' 条）', lines.join('\r\n'), 'All-Inbounds.txt');
+            },
+            async syncTemplateBindings() {
+                const msg = await HttpUtil.post('/xui/socks/syncTemplate');
+                if (msg.success) {
+                    const r = msg.obj;
+                    Vue.prototype.$message.success(
+                        `同步完成：新建 SOCKS ${r.socksCreated}，匹配 ${r.socksMatched}，绑定入站 ${r.inboundBound}`
+                    );
+                    await this.loadSocksMap();
+                    await this.getDBInbounds();
+                }
             },
             async submit(url, data, modal) {
                 const msg = await HttpUtil.postWithModal(url, data, modal);

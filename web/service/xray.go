@@ -93,7 +93,7 @@ func (s *XrayService) GetXrayConfig() (*xray.Config, error) {
 			continue
 		}
 		socks := socksMap[inbound.SocksProxyId]
-		if socks == nil || !socks.Enable {
+		if socks == nil || !socks.Enable || s.socksProxyService.IsExpired(socks) {
 			continue
 		}
 		bindings = append(bindings, inboundSocksBinding{
