@@ -8,3 +8,7 @@ x-ui-*.tar.gz
 /release.sh
 .sync*
 main
+
+# 本地 Git 助手脚本（勿提交）
+提交.bat
+打标签.bat
