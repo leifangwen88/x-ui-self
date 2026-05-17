@@ -3,8 +3,6 @@ package service
 import (
 	"encoding/base64"
 	"strings"
-
-	"x-ui/database/model"
 )
 
 type SubscriptionService struct {
