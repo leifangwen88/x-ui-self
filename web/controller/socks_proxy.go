@@ -2,6 +2,7 @@ package controller
 
 import (
 	"github.com/gin-gonic/gin"
+	"x-ui/util/common"
 	"x-ui/web/service"
 )
 
@@ -24,6 +25,7 @@ func (a *SocksProxyController) initRouter(g *gin.RouterGroup) {
 	g.POST("/list", a.list)
 	g.POST("/import", a.importText)
 	g.POST("/del", a.del)
+	g.POST("/delExpired", a.delExpired)
 	g.POST("/updateRemark", a.updateRemark)
 	g.POST("/gameStatuses", a.gameStatuses)
 	g.POST("/setGameBan", a.setGameBan)
@@ -108,6 +110,20 @@ func (a *SocksProxyController) setGameBan(c *gin.Context) {
 	}
 	err := a.socksGameService.SetBanned(req.SocksProxyId, req.GameId, req.Banned, req.Note)
 	jsonMsg(c, "更新封禁", err)
+}
+
+func (a *SocksProxyController) delExpired(c *gin.Context) {
+	deleted, err := a.socksProxyService.DeleteExpired()
+	if err != nil {
+		jsonMsg(c, "删除已过期 SOCKS", err)
+		return
+	}
+	if deleted == 0 {
+		jsonMsg(c, "没有已到期的 SOCKS5", common.NewError("没有已到期的 SOCKS5"))
+		return
+	}
+	a.xrayService.SetToNeedRestart()
+	jsonObj(c, map[string]int{"deleted": deleted}, nil)
 }
 
 func (a *SocksProxyController) del(c *gin.Context) {

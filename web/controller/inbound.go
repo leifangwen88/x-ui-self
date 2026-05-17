@@ -33,6 +33,7 @@ func (a *InboundController) initRouter(g *gin.RouterGroup) {
 	g.POST("/update/:id", a.updateInbound)
 	g.POST("/resetAllTraffic", a.resetAllTraffic)
 	g.POST("/updateSocks/:id", a.updateSocks)
+	g.POST("/updateGame/:id", a.updateGame)
 	g.POST("/rotate/:id", a.rotate)
 }
 
@@ -108,6 +109,23 @@ func (a *InboundController) updateSocks(c *gin.Context) {
 	if err == nil {
 		a.xrayService.SetToNeedRestart()
 	}
+}
+
+func (a *InboundController) updateGame(c *gin.Context) {
+	id, err := strconv.Atoi(c.Param("id"))
+	if err != nil {
+		jsonMsg(c, "修改游戏", err)
+		return
+	}
+	req := struct {
+		GameId int `form:"gameId" json:"gameId"`
+	}{}
+	if err := c.ShouldBind(&req); err != nil {
+		jsonMsg(c, "修改游戏", err)
+		return
+	}
+	err = a.inboundService.UpdateGameId(id, req.GameId)
+	jsonMsg(c, "修改游戏", err)
 }
 
 func (a *InboundController) rotate(c *gin.Context) {

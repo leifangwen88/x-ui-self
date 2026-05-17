@@ -199,6 +199,21 @@ func (s *InboundService) AddTraffic(traffics []*xray.Traffic) (err error) {
 	return
 }
 
+func (s *InboundService) UpdateGameId(id int, gameId int) error {
+	if err := s.checkGameId(gameId); err != nil {
+		return err
+	}
+	db := database.GetDB()
+	result := db.Model(model.Inbound{}).Where("id = ?", id).Update("game_id", gameId)
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return common.NewError("入站不存在:", id)
+	}
+	return nil
+}
+
 func (s *InboundService) UpdateSocksProxyId(id int, socksProxyId int) error {
 	inbound, err := s.GetInbound(id)
 	if err != nil {

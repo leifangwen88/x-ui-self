@@ -23,7 +23,7 @@
                     <p style="color:#666;margin-bottom:12px;">
                         游戏数量不限。IP 对游戏有两档标记：<b>用过</b>、<b>封禁过</b>。
                         轮换池：未过期且在该游戏<b>未封禁</b>的 IP 均可参与（含用过）。
-                        统计仅计<b>未过期</b>的可用 IP；封禁数含已过期 IP。
+                        可用 IP 仅计池中<b>未过期</b>的 SOCKS；<b>被封禁 IP</b> 为历史累计（删除过期 SOCKS 后仍保留，便于对比各游戏封禁情况）。
                     </p>
                     <a-table :columns="columns" :data-source="games" :row-key="g => g.id" :pagination="false">
                         <template slot="fresh" slot-scope="text, record">

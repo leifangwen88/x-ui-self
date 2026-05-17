@@ -30,23 +30,29 @@ func (s *GameService) ListWithStats() ([]*GameWithStats, error) {
 		return nil, err
 	}
 	statusMap := make(map[int]map[int]*model.SocksGameStatus)
+	bannedPerGame := make(map[int]int)
 	for _, st := range statuses {
 		if statusMap[st.SocksProxyId] == nil {
 			statusMap[st.SocksProxyId] = make(map[int]*model.SocksGameStatus)
 		}
 		statusMap[st.SocksProxyId][st.GameId] = st
+		if st.Status == model.SocksGameStatusBanned {
+			bannedPerGame[st.GameId]++
+		}
 	}
 
 	result := make([]*GameWithStats, 0, len(games))
 	for _, game := range games {
-		stats := GameIpStats{GameId: game.Id}
+		stats := GameIpStats{
+			GameId:      game.Id,
+			BannedCount: bannedPerGame[game.Id],
+		}
 		for _, socks := range socksList {
 			if !socks.Enable {
 				continue
 			}
 			st := statusMap[socks.Id][game.Id]
 			if st != nil && st.Status == model.SocksGameStatusBanned {
-				stats.BannedCount++
 				continue
 			}
 			if socksService.IsExpired(socks) {

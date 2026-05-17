@@ -110,11 +110,39 @@ func (s *SocksProxyService) DeleteByIds(ids []int) error {
 		tx.Rollback()
 		return err
 	}
+	// 保留 SocksGameStatus，供游戏管理统计历史封禁数（删除 SOCKS 不减少被封禁计数）
 	if err := tx.Delete(&model.SocksProxy{}, ids).Error; err != nil {
 		tx.Rollback()
 		return err
 	}
 	return tx.Commit().Error
+}
+
+func (s *SocksProxyService) ListExpiredIds() ([]int, error) {
+	now := time.Now().UnixMilli()
+	db := database.GetDB()
+	var ids []int
+	err := db.Model(model.SocksProxy{}).
+		Where("expiry_time > 0 AND expiry_time < ?", now).
+		Pluck("id", &ids).Error
+	if err != nil && err != gorm.ErrRecordNotFound {
+		return nil, err
+	}
+	return ids, nil
+}
+
+func (s *SocksProxyService) DeleteExpired() (int, error) {
+	ids, err := s.ListExpiredIds()
+	if err != nil {
+		return 0, err
+	}
+	if len(ids) == 0 {
+		return 0, nil
+	}
+	if err := s.DeleteByIds(ids); err != nil {
+		return 0, err
+	}
+	return len(ids), nil
 }
 
 func (s *SocksProxyService) UpdateEnable(id int, enable bool) error {

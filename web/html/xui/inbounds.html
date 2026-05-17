@@ -62,13 +62,18 @@
                                 <a-button @click="batchResetTraffic">批量重置</a-button>
                                 <a-button @click="batchExport">批量导出</a-button>
                                 <a-button @click="syncTemplateBindings">同步模板绑定</a-button>
+                                <a-button type="primary" :disabled="selectedRowKeys.length === 0"
+                                          @click="openBatchRotate">
+                                    批量轮换 ([[ selectedRowKeys.length ]])
+                                </a-button>
                             </a-space>
                         </template>
 <!--                        <a-input v-model="searchKey" placeholder="搜索" autofocus style="max-width: 300px"></a-input>-->
                         <a-table :columns="columns" :row-key="dbInbound => dbInbound.id"
                                  :data-source="dbInbounds"
-                                 :loading="spinning" :scroll="{ x: 1500 }"
+                                 :loading="spinning" :scroll="{ x: 1600 }"
                                  :pagination="false"
+                                 :row-selection="{ selectedRowKeys: selectedRowKeys, onChange: onInboundSelectChange }"
                                  style="margin-top: 20px"
                                  @change="() => getDBInbounds()">
                             <template slot="action" slot-scope="text, dbInbound">
@@ -80,9 +85,6 @@
                                         </a-menu-item>
                                         <a-menu-item v-if="dbInbound.hasLink()" key="exportLink">
                                             <a-icon type="copy"></a-icon>导出链接
-                                        </a-menu-item>
-                                        <a-menu-item v-if="dbInbound.gameId" key="rotate">
-                                            <a-icon type="swap"></a-icon>轮换 IP
                                         </a-menu-item>
                                         <a-menu-item key="edit">
                                             <a-icon type="edit"></a-icon>编辑
@@ -102,8 +104,22 @@
                                 <a-tag color="blue">[[ dbInbound.protocol ]]</a-tag>
                             </template>
                             <template slot="game" slot-scope="text, dbInbound">
-                                <a-tag v-if="gameName(dbInbound.gameId)" color="orange">[[ gameName(dbInbound.gameId) ]]</a-tag>
-                                <span v-else style="color:#999;">未指定</span>
+                                <a-select :value="dbInbound.gameId || 0"
+                                          placeholder="选择游戏"
+                                          style="width: 110px;"
+                                          @change="val => onGameChange(dbInbound, val)">
+                                    <a-select-option :value="0">未指定</a-select-option>
+                                    <a-select-option v-for="g in enabledGames" :key="g.id" :value="g.id">
+                                        [[ g.name ]]
+                                    </a-select-option>
+                                </a-select>
+                            </template>
+                            <template slot="rotate" slot-scope="text, dbInbound">
+                                <a-button size="small" type="primary"
+                                          :disabled="!dbInbound.gameId"
+                                          @click="openRotateModal(dbInbound)">
+                                    轮换
+                                </a-button>
                             </template>
                             <template slot="socks" slot-scope="text, dbInbound">
                                 <div class="socks-cell">
@@ -175,27 +191,34 @@
                     </a-card>
                 </transition>
             </a-spin>
-            <a-modal v-model="rotateModal.visible" title="轮换 IP" :closable="!rotateModal.loading"
-                     :mask-closable="false" @ok="confirmRotate" :confirm-loading="rotateModal.loading"
+            <a-modal v-model="rotateModal.visible"
+                     :title="rotateModal.mode === 'batch' ? '批量轮换 IP' : '轮换 IP'"
+                     :closable="!rotateModal.loading" :mask-closable="false"
+                     width="640" @ok="confirmRotate" :confirm-loading="rotateModal.loading"
                      ok-text="确认轮换" cancel-text="取消">
-                <p v-if="rotateModal.dbInbound">
-                    游戏：<b>[[ gameName(rotateModal.dbInbound.gameId) ]]</b>
-                    <span v-if="rotateModal.dbInbound.socksProxyId">
-                        ，当前 SOCKS：<b>#[[ rotateModal.dbInbound.socksProxyId ]]</b>
-                    </span>
-                    <span v-else>，当前未绑定 SOCKS</span>
-                </p>
-                <a-alert v-if="rotateModal.dbInbound && rotateModal.dbInbound.socksProxyId" type="warning"
-                         show-icon style="margin: 12px 0;"
-                         message="必须先标记即将弃用的 IP（不可跳过）"></a-alert>
-                <div v-if="rotateModal.dbInbound && rotateModal.dbInbound.socksProxyId">
-                    <div style="margin-bottom:8px;"><span style="color:#f5222d;">*</span> 对当前 IP 的标记：</div>
-                    <a-radio-group v-model="rotateModal.outgoingMark">
-                        <a-radio value="used" style="display:block;margin:8px 0;">用过（该游戏仍可用，可进轮换池）</a-radio>
-                        <a-radio value="banned" style="display:block;margin:8px 0;">封禁过（该游戏不再使用此 IP）</a-radio>
-                    </a-radio-group>
+                <a-alert type="warning" show-icon style="margin-bottom: 12px;"
+                         message="有当前 IP 的入站必须先标记「用过」或「封禁过」，不可跳过"></a-alert>
+                <div style="max-height: 420px; overflow-y: auto;">
+                    <div v-for="(item, idx) in rotateModal.items" :key="item.dbInbound.id"
+                         style="border:1px solid #f0f0f0;border-radius:4px;padding:12px;margin-bottom:10px;">
+                        <div style="margin-bottom:8px;">
+                            <b>[[ item.dbInbound.remark || ('入站#' + item.dbInbound.id) ]]</b>
+                            · 游戏 <b>[[ gameName(item.dbInbound.gameId) ]]</b>
+                            <span v-if="item.dbInbound.socksProxyId">
+                                · 当前 SOCKS <b>#[[ item.dbInbound.socksProxyId ]]</b>
+                            </span>
+                            <span v-else style="color:#52c41a;"> · 未绑 IP，将直接分配新 IP</span>
+                        </div>
+                        <div v-if="item.dbInbound.socksProxyId">
+                            <span style="color:#f5222d;">*</span> 标记当前 IP：
+                            <a-radio-group v-model="item.outgoingMark" style="margin-left:8px;">
+                                <a-radio value="used">用过</a-radio>
+                                <a-radio value="banned">封禁过</a-radio>
+                            </a-radio-group>
+                        </div>
+                    </div>
                 </div>
-                <p v-else style="color:#666;margin-top:8px;">将自动选择未过期、未封禁的 IP（优先全新）。</p>
+                <p style="color:#666;margin-top:8px;">将自动选择未过期、未封禁的 IP（优先该游戏下全新 IP）。</p>
             </a-modal>
         </a-layout-content>
     </a-layout>
@@ -236,8 +259,13 @@
     }, {
         title: "游戏",
         align: 'center',
-        width: 90,
+        width: 120,
         scopedSlots: { customRender: 'game' },
+    }, {
+        title: "轮换",
+        align: 'center',
+        width: 72,
+        scopedSlots: { customRender: 'rotate' },
     }, {
         title: "SOCKS5",
         align: 'center',
@@ -279,11 +307,12 @@
             socksRemarkCache: {},
             games: [],
             gameStatusMap: {},
+            selectedRowKeys: [],
             rotateModal: {
                 visible: false,
                 loading: false,
-                dbInbound: null,
-                outgoingMark: '',
+                mode: 'single',
+                items: [],
             },
         },
         methods: {
@@ -415,6 +444,22 @@
                     socks.remark = prev;
                 }
             },
+            onInboundSelectChange(keys) {
+                this.selectedRowKeys = keys;
+            },
+            async onGameChange(dbInbound, val) {
+                const gameId = val == null ? 0 : val;
+                if (gameId === (dbInbound.gameId || 0)) {
+                    return;
+                }
+                const msg = await HttpUtil.post(`/xui/inbound/updateGame/${dbInbound.id}`, {
+                    gameId: gameId,
+                });
+                if (msg.success) {
+                    dbInbound.gameId = gameId;
+                    this.$message.success('游戏已更新');
+                }
+            },
             loading(spinning=true) {
                 this.spinning = spinning;
             },
@@ -455,9 +500,6 @@
                         break;
                     case "exportLink":
                         this.exportInboundLink(dbInbound);
-                        break;
-                    case "rotate":
-                        this.openRotateModal(dbInbound);
                         break;
                     case "edit":
                         this.openEditInbound(dbInbound);
@@ -583,33 +625,80 @@
             },
             openRotateModal(dbInbound) {
                 if (!dbInbound.gameId) {
-                    this.$message.warning('请先为入站绑定游戏');
+                    this.$message.warning('请先指定游戏');
                     return;
                 }
-                this.rotateModal.dbInbound = dbInbound;
-                this.rotateModal.outgoingMark = '';
+                this.rotateModal.mode = 'single';
+                this.rotateModal.items = [{ dbInbound: dbInbound, outgoingMark: '' }];
+                this.rotateModal.visible = true;
+            },
+            openBatchRotate() {
+                if (this.selectedRowKeys.length === 0) {
+                    this.$message.warning('请先勾选入站');
+                    return;
+                }
+                const items = [];
+                const skipped = [];
+                for (const id of this.selectedRowKeys) {
+                    const ib = this.dbInbounds.find(x => x.id === id);
+                    if (!ib) {
+                        continue;
+                    }
+                    if (!ib.gameId) {
+                        skipped.push(ib.remark || ('#' + ib.id));
+                        continue;
+                    }
+                    items.push({ dbInbound: ib, outgoingMark: '' });
+                }
+                if (skipped.length > 0) {
+                    this.$message.warning('以下入站未指定游戏已跳过：' + skipped.join('、'));
+                }
+                if (items.length === 0) {
+                    this.$message.warning('没有可轮换的入站（需先指定游戏）');
+                    return;
+                }
+                this.rotateModal.mode = 'batch';
+                this.rotateModal.items = items;
                 this.rotateModal.visible = true;
             },
             async confirmRotate() {
-                const dbInbound = this.rotateModal.dbInbound;
-                if (!dbInbound || !dbInbound.gameId) {
+                const items = this.rotateModal.items || [];
+                if (items.length === 0) {
                     return;
                 }
-                if (dbInbound.socksProxyId > 0 &&
-                    this.rotateModal.outgoingMark !== 'used' &&
-                    this.rotateModal.outgoingMark !== 'banned') {
-                    this.$message.warning('请选择对当前 IP 的标记：用过 或 封禁过');
-                    return;
+                for (const item of items) {
+                    if (item.dbInbound.socksProxyId > 0 &&
+                        item.outgoingMark !== 'used' &&
+                        item.outgoingMark !== 'banned') {
+                        const name = item.dbInbound.remark || ('入站#' + item.dbInbound.id);
+                        this.$message.warning(`请为「${name}」标记当前 IP：用过 或 封禁过`);
+                        return;
+                    }
                 }
                 this.rotateModal.loading = true;
-                const msg = await HttpUtil.post(`/xui/inbound/rotate/${dbInbound.id}`, {
-                    outgoingMark: this.rotateModal.outgoingMark,
-                });
+                let ok = 0;
+                let fail = 0;
+                let lastResult = null;
+                for (const item of items) {
+                    const msg = await HttpUtil.post(`/xui/inbound/rotate/${item.dbInbound.id}`, {
+                        outgoingMark: item.outgoingMark || '',
+                    });
+                    if (msg.success) {
+                        ok++;
+                        lastResult = msg.obj;
+                    } else {
+                        fail++;
+                    }
+                }
                 this.rotateModal.loading = false;
-                if (msg.success) {
-                    const r = msg.obj;
+                if (ok > 0) {
                     this.rotateModal.visible = false;
-                    this.$message.success(`已轮换：SOCKS #${r.fromSocksId || 0} → #${r.toSocksId}`);
+                    this.selectedRowKeys = [];
+                    if (items.length === 1 && lastResult) {
+                        this.$message.success(`已轮换：SOCKS #${lastResult.fromSocksId || 0} → #${lastResult.toSocksId}`);
+                    } else {
+                        this.$message.success(`批量轮换完成：成功 ${ok} 条${fail > 0 ? '，失败 ' + fail + ' 条' : ''}`);
+                    }
                     await this.loadSocksMap();
                     await this.getDBInbounds();
                 }
@@ -670,6 +759,9 @@
             this.getDBInbounds();
         },
         computed: {
+            enabledGames() {
+                return (this.games || []).filter(g => g.enable);
+            },
             total() {
                 let down = 0, up = 0;
                 for (let i = 0; i < this.dbInbounds.length; ++i) {

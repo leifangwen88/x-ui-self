@@ -25,6 +25,13 @@
     .socks-inbound-bind {
         min-width: 200px;
     }
+    .game-status-cell {
+        max-width: 280px;
+        line-height: 1.8;
+    }
+    .game-status-cell .ant-tag {
+        margin: 2px 4px 2px 0;
+    }
 </style>
 <body>
 <a-layout id="app" v-cloak>
@@ -60,6 +67,11 @@
                 <a-card title="SOCKS5 列表">
                     <template slot="extra">
                         <a-button style="margin-right: 8px;" @click="syncFromTemplate" :loading="syncing">同步模板绑定</a-button>
+                        <a-button type="danger" ghost style="margin-right: 8px;"
+                                  :disabled="expiredSocksCount === 0" :loading="deletingExpired"
+                                  @click="deleteExpired">
+                            删除已过期 ([[ expiredSocksCount ]])
+                        </a-button>
                         <a-button type="danger" :disabled="selectedRowKeys.length === 0" @click="deleteSelected">
                             删除选中 ([[ selectedRowKeys.length ]])
                         </a-button>
@@ -79,6 +91,21 @@
                                     <a-select-option value="valid">未到期</a-select-option>
                                     <a-select-option value="expired">已到期</a-select-option>
                                     <a-select-option value="unlimited">无期限</a-select-option>
+                                </a-select>
+                            </a-form-item>
+                            <a-form-item label="游戏">
+                                <a-select v-model="filterGameId" style="width: 130px;" @change="onFilterGameChange">
+                                    <a-select-option :value="0">全部游戏</a-select-option>
+                                    <a-select-option v-for="g in enabledGames" :key="g.id" :value="g.id">
+                                        [[ g.name ]]
+                                    </a-select-option>
+                                </a-select>
+                            </a-form-item>
+                            <a-form-item label="游戏标记">
+                                <a-select v-model="filterGameMark" style="width: 160px;">
+                                    <a-select-option v-for="opt in gameMarkFilterOptions" :key="opt.value" :value="opt.value">
+                                        [[ opt.label ]]
+                                    </a-select-option>
                                 </a-select>
                             </a-form-item>
                             <a-form-item label="排序">
@@ -125,22 +152,30 @@
                                 <a-tag v-else color="blue">[[ formatTime(record.expiryTime) ]]</a-tag>
                             </template>
                             <template slot="gameMark" slot-scope="text, record">
-                                <a-dropdown :trigger="['click']">
-                                    <a @click="e => e.preventDefault()">
-                                        <a-tag v-for="t in usedGameTags(record)" :key="'u'+t" color="blue" style="margin:2px;">[[ t ]]·用过</a-tag>
-                                        <a-tag v-for="t in bannedGameTags(record)" :key="'b'+t" color="red" style="margin:2px;">[[ t ]]·封禁</a-tag>
-                                        <span v-if="!usedGameTags(record).length && !bannedGameTags(record).length"
-                                              style="color:#999;">设置标记</span>
-                                    </a>
-                                    <a-menu slot="overlay" @click="a => onGameMarkMenu(a, record)">
-                                        <template v-for="g in games">
-                                            <a-menu-item :key="g.id + ':used'">[[ g.name ]] → 标记「用过」</a-menu-item>
-                                            <a-menu-item :key="g.id + ':banned'">[[ g.name ]] → 标记「封禁过」</a-menu-item>
-                                            <a-menu-item v-if="isGameBanned(record.id, g.id) || isGameUsed(record.id, g.id)"
-                                                         :key="g.id + ':clear'">[[ g.name ]] → 清除标记</a-menu-item>
-                                        </template>
-                                    </a-menu>
-                                </a-dropdown>
+                                <div class="game-status-cell">
+                                    <template v-if="gameStatusEntries(record).length">
+                                        <a-tooltip v-for="e in gameStatusEntries(record)" :key="e.gameId + e.type"
+                                                   :title="gameStatusTooltip(e)">
+                                            <a-tag :color="e.type === 'banned' ? 'red' : 'blue'">
+                                                [[ e.name ]]·[[ e.type === 'banned' ? '封禁' : '用过' ]]
+                                                <span v-if="e.useCount > 0">([[ e.useCount ]])</span>
+                                            </a-tag>
+                                        </a-tooltip>
+                                    </template>
+                                    <span v-else style="color:#999;">无标记</span>
+                                    <a-dropdown :trigger="['click']">
+                                        <a-button type="link" size="small" style="padding:0 4px;height:auto;"
+                                                  @click="e => e.preventDefault()">设置</a-button>
+                                        <a-menu slot="overlay" @click="a => onGameMarkMenu(a, record)">
+                                            <template v-for="g in enabledGames">
+                                                <a-menu-item :key="g.id + ':used'">[[ g.name ]] → 用过</a-menu-item>
+                                                <a-menu-item :key="g.id + ':banned'">[[ g.name ]] → 封禁过</a-menu-item>
+                                                <a-menu-item v-if="hasGameMark(record.id, g.id)"
+                                                             :key="g.id + ':clear'">[[ g.name ]] → 清除</a-menu-item>
+                                            </template>
+                                        </a-menu>
+                                    </a-dropdown>
+                                </div>
                             </template>
                             <template slot="inbound" slot-scope="text, record">
                                 <a-select class="socks-inbound-bind"
@@ -200,9 +235,9 @@
         scopedSlots: { customRender: 'inbound' },
         width: 240,
     }, {
-        title: '游戏标记',
+        title: '游戏状态',
         scopedSlots: { customRender: 'gameMark' },
-        width: 220,
+        width: 280,
     }];
 
     const app = new Vue({
@@ -213,6 +248,7 @@
             spinning: false,
             importing: false,
             syncing: false,
+            deletingExpired: false,
             importText: '',
             importExpiryTime: SocksUtil.defaultImportExpiry(),
             datePickerLocale: typeof datePickerLocale !== 'undefined' ? datePickerLocale : {},
@@ -224,14 +260,35 @@
             games: [],
             gameStatusMap: {},
             allInbounds: [],
-            allInbounds: [],
             filterBind: 'all',
             filterExpiry: 'all',
+            filterGameId: 0,
+            filterGameMark: 'all',
             sortBy: 'createdDesc',
             page: 1,
             pageSize: 50,
         },
         computed: {
+            enabledGames() {
+                return (this.games || []).filter(g => g.enable);
+            },
+            gameMarkFilterOptions() {
+                if (this.filterGameId > 0) {
+                    return [
+                        { value: 'all', label: '全部' },
+                        { value: 'used', label: '该游戏·用过' },
+                        { value: 'banned', label: '该游戏·封禁过' },
+                        { value: 'unmarked', label: '该游戏·无标记' },
+                    ];
+                }
+                return [
+                    { value: 'all', label: '全部' },
+                    { value: 'any_used', label: '任意游戏·用过' },
+                    { value: 'any_banned', label: '任意游戏·封禁过' },
+                    { value: 'any_mark', label: '有任意标记' },
+                    { value: 'none', label: '无任何标记' },
+                ];
+            },
             filteredSocksList() {
                 let list = this.socksList.slice();
                 if (this.filterBind === 'bound') {
@@ -246,6 +303,9 @@
                 } else if (this.filterExpiry === 'unlimited') {
                     list = list.filter(s => !s.expiryTime || s.expiryTime <= 0);
                 }
+                if (this.filterGameMark !== 'all') {
+                    list = list.filter(s => this.matchesGameFilter(s.id));
+                }
                 list.sort((a, b) => {
                     switch (this.sortBy) {
                         case 'createdAsc': return (a.createdAt || 0) - (b.createdAt || 0);
@@ -259,6 +319,9 @@
             pagedSocksList() {
                 const start = (this.page - 1) * this.pageSize;
                 return this.filteredSocksList.slice(start, start + this.pageSize);
+            },
+            expiredSocksCount() {
+                return this.socksList.filter(s => this.isExpired(s)).length;
             },
         },
         methods: {
@@ -310,23 +373,105 @@
                 const st = m[gameId];
                 return st.useCount > 0 || st.status === 'used';
             },
-            usedGameTags(record) {
-                const tags = [];
-                for (const g of this.games) {
-                    if (this.isGameUsed(record.id, g.id)) {
-                        tags.push(g.name);
-                    }
-                }
-                return tags;
+            hasGameMark(socksId, gameId) {
+                return this.isGameUsed(socksId, gameId) || this.isGameBanned(socksId, gameId);
             },
-            bannedGameTags(record) {
-                const tags = [];
-                for (const g of this.games) {
-                    if (this.isGameBanned(record.id, g.id)) {
-                        tags.push(g.name);
+            hasAnyGameMark(socksId) {
+                return this.enabledGames.some(g => this.hasGameMark(socksId, g.id));
+            },
+            hasAnyGameUsed(socksId) {
+                return this.enabledGames.some(g => this.isGameUsed(socksId, g.id));
+            },
+            hasAnyGameBanned(socksId) {
+                return this.enabledGames.some(g => this.isGameBanned(socksId, g.id));
+            },
+            matchesGameFilter(socksId) {
+                const mark = this.filterGameMark;
+                if (mark === 'all') {
+                    return true;
+                }
+                const gid = this.filterGameId;
+                if (gid > 0) {
+                    switch (mark) {
+                        case 'used': return this.isGameUsed(socksId, gid);
+                        case 'banned': return this.isGameBanned(socksId, gid);
+                        case 'unmarked': return !this.hasGameMark(socksId, gid);
+                        default: return true;
                     }
                 }
-                return tags;
+                switch (mark) {
+                    case 'any_used': return this.hasAnyGameUsed(socksId);
+                    case 'any_banned': return this.hasAnyGameBanned(socksId);
+                    case 'any_mark': return this.hasAnyGameMark(socksId);
+                    case 'none': return !this.hasAnyGameMark(socksId);
+                    default: return true;
+                }
+            },
+            onFilterGameChange() {
+                if (this.filterGameId > 0) {
+                    if (['any_used', 'any_banned', 'any_mark', 'none'].indexOf(this.filterGameMark) >= 0) {
+                        this.filterGameMark = 'all';
+                    }
+                } else {
+                    if (['used', 'banned', 'unmarked'].indexOf(this.filterGameMark) >= 0) {
+                        this.filterGameMark = 'all';
+                    }
+                }
+                this.page = 1;
+            },
+            gameStatusEntries(record) {
+                const m = this.gameStatusMap[record.id] || {};
+                const entries = [];
+                for (const g of this.games) {
+                    const st = m[g.id];
+                    if (!st) {
+                        continue;
+                    }
+                    if (st.status === 'banned') {
+                        entries.push({
+                            gameId: g.id,
+                            name: g.name,
+                            type: 'banned',
+                            useCount: st.useCount || 0,
+                            lastUsedAt: st.lastUsedAt,
+                            bannedAt: st.bannedAt,
+                            note: st.note,
+                        });
+                    } else if (st.useCount > 0 || st.status === 'used') {
+                        entries.push({
+                            gameId: g.id,
+                            name: g.name,
+                            type: 'used',
+                            useCount: st.useCount || 0,
+                            lastUsedAt: st.lastUsedAt,
+                            note: st.note,
+                        });
+                    }
+                }
+                entries.sort((a, b) => {
+                    if (a.type !== b.type) {
+                        return a.type === 'banned' ? 1 : -1;
+                    }
+                    return a.name.localeCompare(b.name, 'zh');
+                });
+                return entries;
+            },
+            gameStatusTooltip(e) {
+                const parts = [e.name];
+                parts.push(e.type === 'banned' ? '封禁过' : '用过');
+                if (e.useCount > 0) {
+                    parts.push('使用次数 ' + e.useCount);
+                }
+                if (e.lastUsedAt > 0) {
+                    parts.push('最近使用 ' + this.formatTime(e.lastUsedAt));
+                }
+                if (e.bannedAt > 0) {
+                    parts.push('封禁时间 ' + this.formatTime(e.bannedAt));
+                }
+                if (e.note) {
+                    parts.push('备注 ' + e.note);
+                }
+                return parts.join(' · ');
             },
             async onGameMarkMenu(action, record) {
                 const key = action.key;
@@ -520,10 +665,36 @@
                     },
                 });
             },
+            deleteExpired() {
+                const n = this.expiredSocksCount;
+                if (n === 0) {
+                    this.$message.info('没有已到期的 SOCKS5');
+                    return;
+                }
+                this.$confirm({
+                    title: '删除已过期 SOCKS5',
+                    content: `将删除全部 ${n} 条已到期 IP（无期限 IP 不会删除）。已绑定的入站将自动解绑；游戏封禁历史统计会保留。确定继续？`,
+                    okText: '删除',
+                    okType: 'danger',
+                    cancelText: '取消',
+                    onOk: async () => {
+                        this.deletingExpired = true;
+                        const msg = await HttpUtil.post('/xui/socks/delExpired');
+                        this.deletingExpired = false;
+                        if (msg.success) {
+                            const deleted = (msg.obj && msg.obj.deleted) || n;
+                            this.$message.success(`已删除 ${deleted} 条已过期 SOCKS5`);
+                            this.selectedRowKeys = [];
+                            await this.loadAll();
+                        }
+                    },
+                });
+            },
         },
         watch: {
             filterBind() { this.page = 1; },
             filterExpiry() { this.page = 1; },
+            filterGameMark() { this.page = 1; },
             sortBy() { this.page = 1; },
         },
         mounted() {
