@@ -56,7 +56,8 @@ func (s *SocksRotationService) PickForInbound(inbound *model.Inbound, excludeSoc
 	if inbound.GameId <= 0 {
 		return nil, common.NewError("请先为入站绑定游戏")
 	}
-	_, err := GameService{}.GetById(inbound.GameId)
+	gameService := &GameService{}
+	_, err := gameService.GetById(inbound.GameId)
 	if err != nil {
 		return nil, common.NewError("入站绑定的游戏不存在")
 	}
