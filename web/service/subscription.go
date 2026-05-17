@@ -24,12 +24,14 @@ type SubGameGroup struct {
 }
 
 type SubInfo struct {
-	Token      string         `json:"token"`
-	SubHost    string         `json:"subHost"`
-	Base64Path string         `json:"base64Path"`
-	LinksPath  string         `json:"linksPath"`
-	ClashPath  string         `json:"clashPath"`
-	Groups     []SubGameGroup `json:"groups"`
+	Token               string         `json:"token"`
+	SubHost             string         `json:"subHost"`
+	Base64Path          string         `json:"base64Path"`
+	LinksPath           string         `json:"linksPath"`
+	ClashPath           string         `json:"clashPath"`
+	TotalInboundCount   int            `json:"totalInboundCount"`
+	UnspecifiedCount    int            `json:"unspecifiedCount"`
+	Groups              []SubGameGroup `json:"groups"`
 }
 
 func (s *SubscriptionService) GetInfo() (*SubInfo, error) {
@@ -41,72 +43,62 @@ func (s *SubscriptionService) GetInfo() (*SubInfo, error) {
 	if err != nil {
 		return nil, err
 	}
-	groups, err := s.buildSubGroups(token)
+	groups, total, unspecified, err := s.buildSubGroups(token)
 	if err != nil {
 		return nil, err
 	}
 	return &SubInfo{
-		Token:      token,
-		SubHost:    subHost,
-		Base64Path: "sub/" + token,
-		LinksPath:  "sub/" + token + "?type=links",
-		ClashPath:  "sub/" + token + "?type=clash",
-		Groups:     groups,
+		Token:             token,
+		SubHost:           subHost,
+		Base64Path:        "sub/" + token,
+		LinksPath:         "sub/" + token + "?type=links",
+		ClashPath:         "sub/" + token + "?type=clash",
+		TotalInboundCount: total,
+		UnspecifiedCount:  unspecified,
+		Groups:            groups,
 	}, nil
 }
 
-func (s *SubscriptionService) buildSubGroups(token string) ([]SubGameGroup, error) {
+func (s *SubscriptionService) buildSubGroups(token string) ([]SubGameGroup, int, int, error) {
 	games, err := s.gameService.GetAll()
 	if err != nil {
-		return nil, err
-	}
-	gameName := make(map[int]string)
-	for _, g := range games {
-		gameName[g.Id] = g.Name
+		return nil, 0, 0, err
 	}
 	inbounds, err := s.inboundService.GetAllInbounds()
 	if err != nil {
-		return nil, err
+		return nil, 0, 0, err
 	}
 	countByGame := make(map[int]int)
+	total := 0
 	for _, ib := range inbounds {
 		if !ib.Enable || !InboundSupportsLink(ib.Protocol) {
 			continue
 		}
+		total++
 		gid := ib.GameId
 		if gid <= 0 {
 			gid = 0
 		}
 		countByGame[gid]++
 	}
+	unspecified := countByGame[0]
 	var groups []SubGameGroup
-	addGroup := func(gid int, name string) {
-		n := countByGame[gid]
+	for _, g := range games {
+		n := countByGame[g.Id]
 		if n == 0 {
-			return
+			continue
 		}
-		prefix := fmt.Sprintf("sub/%s", token)
-		if gid > 0 {
-			prefix += fmt.Sprintf("?gameId=%d", gid)
-		} else {
-			prefix += "?gameId=0"
-		}
+		prefix := fmt.Sprintf("sub/%s?gameId=%d", token, g.Id)
 		groups = append(groups, SubGameGroup{
-			GameId:       gid,
-			GameName:     name,
+			GameId:       g.Id,
+			GameName:     g.Name,
 			InboundCount: n,
 			Base64Path:   prefix,
 			LinksPath:    prefix + "&type=links",
 			ClashPath:    prefix + "&type=clash",
 		})
 	}
-	for _, g := range games {
-		addGroup(g.Id, g.Name)
-	}
-	if countByGame[0] > 0 {
-		addGroup(0, "未指定游戏")
-	}
-	return groups, nil
+	return groups, total, unspecified, nil
 }
 
 func (s *SubscriptionService) ResetToken() (string, error) {
@@ -134,6 +126,9 @@ func (s *SubscriptionService) filterInbounds(gameId int) ([]*model.Inbound, erro
 	}
 	list := make([]*model.Inbound, 0)
 	for _, ib := range inbounds {
+		if !ib.Enable || !InboundSupportsLink(ib.Protocol) {
+			continue
+		}
 		gid := ib.GameId
 		if gid <= 0 {
 			gid = 0

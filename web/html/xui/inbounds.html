@@ -63,6 +63,8 @@
                             </template>
                             <p style="color:#666;margin-bottom:12px;">
                                 将 URL 填入客户端「订阅」；仅含<b>已启用</b>且支持链接的入站。密钥请勿泄露。
+                                <br>推荐使用<b>总订阅</b>：一条链接包含全部节点；Clash / Mihomo 内按游戏分组显示（未绑定游戏的入站在「未指定游戏」组）。
+                                下方可按游戏单独订阅（可选）。
                             </p>
                             <a-form layout="vertical">
                                 <a-form-item label="订阅节点域名（可选）" style="margin-bottom:12px;">
@@ -70,23 +72,34 @@
                                              @blur="saveSubHost" @pressEnter="saveSubHost"></a-input>
                                 </a-form-item>
                             </a-form>
-                            <a-collapse v-if="subInfo.groups && subInfo.groups.length" :bordered="false" style="margin-bottom:12px;">
-                                <a-collapse-panel v-for="g in subInfo.groups" :key="'g'+g.gameId"
-                                                  :header="g.gameName + '（' + g.inboundCount + ' 个入站）'">
-                                    <a-list size="small" bordered :data-source="subGroupUrlItems(g)">
-                                        <a-list-item slot="renderItem" slot-scope="item">
-                                            <a-list-item-meta :title="item.label" :description="subFullUrl(item.path)"></a-list-item-meta>
-                                            <a-button type="link" size="small" @click="copyText(subFullUrl(item.path))">复制</a-button>
-                                        </a-list-item>
-                                    </a-list>
-                                </a-collapse-panel>
-                            </a-collapse>
-                            <a-list v-else size="small" bordered :data-source="subUrlList">
-                                <a-list-item slot="renderItem" slot-scope="item">
-                                    <a-list-item-meta :title="item.label" :description="subFullUrl(item.path)"></a-list-item-meta>
-                                    <a-button type="link" size="small" @click="copyText(subFullUrl(item.path))">复制</a-button>
-                                </a-list-item>
-                            </a-list>
+                            <div style="margin-bottom:16px;">
+                                <div style="font-weight:600;margin-bottom:8px;">
+                                    总订阅
+                                    <span v-if="subInfo.totalInboundCount" style="font-weight:normal;color:#666;">
+                                        （[[ subInfo.totalInboundCount ]] 个入站<span v-if="subInfo.unspecifiedCount">，其中未指定游戏 [[ subInfo.unspecifiedCount ]] 个</span>）
+                                    </span>
+                                </div>
+                                <a-list size="small" bordered :data-source="subUrlList">
+                                    <a-list-item slot="renderItem" slot-scope="item">
+                                        <a-list-item-meta :title="item.label" :description="subFullUrl(item.path)"></a-list-item-meta>
+                                        <a-button type="link" size="small" @click="copyText(subFullUrl(item.path))">复制</a-button>
+                                    </a-list-item>
+                                </a-list>
+                            </div>
+                            <template v-if="subGameGroups.length">
+                                <div style="font-weight:600;margin-bottom:8px;">单游戏订阅（可选）</div>
+                                <a-collapse :bordered="false">
+                                    <a-collapse-panel v-for="g in subGameGroups" :key="'g'+g.gameId"
+                                                      :header="g.gameName + '（' + g.inboundCount + ' 个入站）'">
+                                        <a-list size="small" bordered :data-source="subGroupUrlItems(g)">
+                                            <a-list-item slot="renderItem" slot-scope="item">
+                                                <a-list-item-meta :title="item.label" :description="subFullUrl(item.path)"></a-list-item-meta>
+                                                <a-button type="link" size="small" @click="copyText(subFullUrl(item.path))">复制</a-button>
+                                            </a-list-item>
+                                        </a-list>
+                                    </a-collapse-panel>
+                                </a-collapse>
+                            </template>
                         </a-collapse-panel>
                     </a-collapse>
                 </transition>
@@ -149,10 +162,11 @@
                                 <a-tag color="blue">[[ dbInbound.protocol ]]</a-tag>
                             </template>
                             <template slot="game" slot-scope="text, dbInbound">
-                                <a-select :value="gameSelectValue(dbInbound)"
+                                <a-select :key="'game-' + dbInbound.id + '-' + gameSelectValue(dbInbound) + '-' + games.length"
+                                          :value="gameSelectValue(dbInbound)"
                                           placeholder="选择游戏"
                                           style="width: 110px;"
-                                          @select="val => onGameSelect(dbInbound, val)">
+                                          @change="val => onGameChange(dbInbound, val)">
                                     <a-select-option :value="0">未指定</a-select-option>
                                     <a-select-option v-for="g in gamesForSelect(dbInbound)" :key="g.id" :value="g.id">
                                         [[ g.name ]]
@@ -359,7 +373,7 @@
                 mode: 'single',
                 items: [],
             },
-            subInfo: { token: '', subHost: '', base64Path: '', linksPath: '', clashPath: '', groups: [] },
+            subInfo: { token: '', subHost: '', base64Path: '', linksPath: '', clashPath: '', totalInboundCount: 0, unspecifiedCount: 0, groups: [] },
             subHostInput: '',
             subPanelActive: [],
         },
@@ -504,6 +518,48 @@
                     && option.componentOptions.children[0].text) || '';
                 return text.toLowerCase().indexOf((input || '').toLowerCase()) >= 0;
             },
+            applySocksList(list) {
+                const map = {};
+                const cache = {};
+                for (const s of (list || [])) {
+                    map[s.id] = s;
+                    cache[s.id] = s.remark || '';
+                }
+                this.socksMap = map;
+                this.socksList = list || [];
+                this.socksRemarkCache = cache;
+            },
+            normalizeDbInboundGameIds() {
+                for (const ib of this.dbInbounds) {
+                    const gid = DBInbound.normalizeGameId(ib);
+                    if (ib.gameId !== gid) {
+                        this.$set(ib, 'gameId', gid);
+                    }
+                }
+            },
+            async loadPageData() {
+                this.loading();
+                const [socksMsg, gameMsg, statusMsg, inboundMsg] = await Promise.all([
+                    HttpUtil.post('/xui/socks/list'),
+                    HttpUtil.post('/xui/game/list'),
+                    HttpUtil.post('/xui/socks/gameStatuses'),
+                    HttpUtil.post('/xui/inbound/list'),
+                ]);
+                if (gameMsg.success) {
+                    this.games = gameMsg.obj || [];
+                }
+                if (statusMsg.success) {
+                    this.buildGameStatusMap(statusMsg.obj);
+                }
+                if (socksMsg.success) {
+                    this.applySocksList(socksMsg.obj);
+                }
+                if (inboundMsg.success) {
+                    this.setInbounds(inboundMsg.obj);
+                }
+                this.normalizeDbInboundGameIds();
+                this.loading(false);
+            },
             async loadSocksMap() {
                 const [socksMsg, gameMsg, statusMsg] = await Promise.all([
                     HttpUtil.post('/xui/socks/list'),
@@ -512,29 +568,14 @@
                 ]);
                 if (gameMsg.success) {
                     this.games = gameMsg.obj || [];
-                    for (const ib of this.dbInbounds) {
-                        const gid = parseInt(ib.gameId, 10) || 0;
-                        if (gid > 0 && ib.gameId !== gid) {
-                            this.$set(ib, 'gameId', gid);
-                        }
-                    }
                 }
                 if (statusMsg.success) {
                     this.buildGameStatusMap(statusMsg.obj);
                 }
-                if (!socksMsg.success) {
-                    return;
+                if (socksMsg.success) {
+                    this.applySocksList(socksMsg.obj);
                 }
-                const list = socksMsg.obj || [];
-                const map = {};
-                const cache = {};
-                for (const s of list) {
-                    map[s.id] = s;
-                    cache[s.id] = s.remark || '';
-                }
-                this.socksMap = map;
-                this.socksList = list;
-                this.socksRemarkCache = cache;
+                this.normalizeDbInboundGameIds();
             },
             async onSocksProxyChange(dbInbound, val) {
                 const socksProxyId = val == null ? 0 : val;
@@ -581,20 +622,23 @@
             hasInboundGame(dbInbound) {
                 return Number(dbInbound.gameId) > 0;
             },
-            async onGameSelect(dbInbound, val) {
-                const gameId = Number(val);
-                const nextId = gameId > 0 ? gameId : 0;
-                if (nextId === this.gameSelectValue(dbInbound)) {
+            async onGameChange(dbInbound, val) {
+                const nextId = Number(val) > 0 ? Number(val) : 0;
+                const prevId = this.gameSelectValue(dbInbound);
+                if (nextId === prevId) {
                     return;
                 }
+                this.$set(dbInbound, 'gameId', nextId);
                 const msg = await this.postSilent(`/xui/inbound/updateGame/${dbInbound.id}`, {
                     gameId: nextId,
                 });
                 if (msg.success) {
-                    this.$set(dbInbound, 'gameId', nextId);
                     this.$message.success(nextId > 0 ? '游戏已更新' : '已取消游戏指定');
-                } else if (msg.msg) {
-                    this.$message.error(msg.msg);
+                } else {
+                    this.$set(dbInbound, 'gameId', prevId);
+                    if (msg.msg) {
+                        this.$message.error(msg.msg);
+                    }
                 }
             },
             async postSilent(url, data) {
@@ -616,13 +660,13 @@
                     return;
                 }
                 this.setInbounds(msg.obj);
+                this.normalizeDbInboundGameIds();
             },
             setInbounds(dbInbounds) {
                 this.inbounds.splice(0);
                 this.dbInbounds.splice(0);
                 for (const inbound of dbInbounds) {
                     const dbInbound = new DBInbound(inbound);
-                    dbInbound.gameId = parseInt(dbInbound.gameId, 10) || 0;
                     this.inbounds.push(dbInbound.toInbound());
                     this.dbInbounds.push(dbInbound);
                 }
@@ -947,7 +991,7 @@
             }
         },
         mounted() {
-            this.loadSocksMap().then(() => this.getDBInbounds());
+            this.loadPageData();
             this.loadSubInfo();
         },
         computed: {
@@ -956,10 +1000,13 @@
                     return [];
                 }
                 return [
-                    { key: 'base64', label: '通用订阅（小火箭 / Surge / QX 等）', path: this.subInfo.base64Path },
-                    { key: 'clash', label: 'Clash / Mihomo 订阅', path: this.subInfo.clashPath },
-                    { key: 'links', label: '纯文本链接', path: this.subInfo.linksPath },
+                    { key: 'clash', label: 'Clash / Mihomo 总订阅（客户端内按游戏分组）', path: this.subInfo.clashPath },
+                    { key: 'base64', label: '通用订阅（全部节点，小火箭 / Surge / QX 等）', path: this.subInfo.base64Path },
+                    { key: 'links', label: '纯文本链接（全部节点）', path: this.subInfo.linksPath },
                 ];
+            },
+            subGameGroups() {
+                return (this.subInfo.groups || []).filter(g => g.gameId > 0);
             },
             enabledGames() {
                 return (this.games || []).filter(g => g.enable);

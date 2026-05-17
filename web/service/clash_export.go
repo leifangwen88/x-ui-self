@@ -17,7 +17,6 @@ func GenClashYamlByGame(inbounds []*model.Inbound, subHost string, requestHost s
 		gameName[g.Id] = g.Name
 	}
 	byGame := make(map[int][]*model.Inbound)
-	order := make([]int, 0)
 	for _, ib := range inbounds {
 		if ib == nil || !ib.Enable || !InboundSupportsLink(ib.Protocol) {
 			continue
@@ -26,11 +25,9 @@ func GenClashYamlByGame(inbounds []*model.Inbound, subHost string, requestHost s
 		if gid <= 0 {
 			gid = 0
 		}
-		if _, ok := byGame[gid]; !ok {
-			order = append(order, gid)
-		}
 		byGame[gid] = append(byGame[gid], ib)
 	}
+	order := clashGameOrder(byGame, games)
 	if len(order) == 0 {
 		return ""
 	}
@@ -94,6 +91,28 @@ func GenClashYamlByGame(inbounds []*model.Inbound, subHost string, requestHost s
 	}
 	b.WriteString("      - DIRECT\n\nrules:\n  - MATCH,节点选择\n")
 	return b.String()
+}
+
+func clashGameOrder(byGame map[int][]*model.Inbound, games []*model.Game) []int {
+	order := make([]int, 0)
+	seen := make(map[int]bool)
+	for _, g := range games {
+		if len(byGame[g.Id]) == 0 {
+			continue
+		}
+		order = append(order, g.Id)
+		seen[g.Id] = true
+	}
+	for gid := range byGame {
+		if gid == 0 || seen[gid] || len(byGame[gid]) == 0 {
+			continue
+		}
+		order = append(order, gid)
+	}
+	if len(byGame[0]) > 0 {
+		order = append(order, 0)
+	}
+	return order
 }
 
 func GenClashYaml(inbounds []*model.Inbound, subHost string, requestHost string) string {
