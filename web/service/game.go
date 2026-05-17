@@ -48,6 +48,7 @@ func (s *GameService) GetById(id int) (*model.Game, error) {
 }
 
 func (s *GameService) Save(game *model.Game) error {
+	game.Name = strings.TrimSpace(game.Name)
 	if game.Name == "" {
 		return common.NewError("游戏名称不能为空")
 	}

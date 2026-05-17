@@ -61,12 +61,12 @@ const (
 )
 
 type Game struct {
-	Id        int    `json:"id" gorm:"primaryKey;autoIncrement"`
-	Name      string `json:"name" gorm:"unique"`
-	Code      string `json:"code" gorm:"uniqueIndex"`
-	Enable    bool   `json:"enable" gorm:"default:true"`
-	SortOrder int    `json:"sortOrder" gorm:"default:0"`
-	Remark    string `json:"remark"`
+	Id        int    `json:"id" form:"id" gorm:"primaryKey;autoIncrement"`
+	Name      string `json:"name" form:"name" gorm:"unique"`
+	Code      string `json:"code" form:"code" gorm:"uniqueIndex"`
+	Enable    bool   `json:"enable" form:"enable" gorm:"default:true"`
+	SortOrder int    `json:"sortOrder" form:"sortOrder" gorm:"default:0"`
+	Remark    string `json:"remark" form:"remark"`
 }
 
 type SocksGameStatus struct {
