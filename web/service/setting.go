@@ -33,6 +33,8 @@ var defaultValueMap = map[string]string{
 	"tgBotToken":         "",
 	"tgBotChatId":        "0",
 	"tgRunTime":          "",
+	"subToken":           "",
+	"subHost":            "",
 }
 
 type SettingService struct {
@@ -251,6 +253,34 @@ func (s *SettingService) GetSecret() ([]byte, error) {
 		}
 	}
 	return []byte(secret), err
+}
+
+func (s *SettingService) GetSubHost() (string, error) {
+	return s.getString("subHost")
+}
+
+func (s *SettingService) SetSubHost(host string) error {
+	return s.setString("subHost", strings.TrimSpace(host))
+}
+
+func (s *SettingService) GetSubToken() (string, error) {
+	token, err := s.getString("subToken")
+	if database.IsNotFound(err) || strings.TrimSpace(token) == "" {
+		token = random.Seq(24)
+		if saveErr := s.setString("subToken", token); saveErr != nil {
+			logger.Warning("save subToken failed:", saveErr)
+		}
+		return token, nil
+	}
+	if err != nil {
+		return "", err
+	}
+	return token, nil
+}
+
+func (s *SettingService) ResetSubToken() (string, error) {
+	token := random.Seq(24)
+	return token, s.setString("subToken", token)
 }
 
 func (s *SettingService) GetBasePath() (string, error) {

@@ -8,6 +8,13 @@
     .stat-fresh { color: #52c41a; font-weight: 600; }
     .stat-old { color: #1890ff; font-weight: 600; }
     .stat-banned { color: #f5222d; font-weight: 600; }
+    .bound-inbound-cell {
+        max-width: 360px;
+        line-height: 1.9;
+    }
+    .bound-inbound-cell .ant-tag {
+        margin: 2px 4px 2px 0;
+    }
 </style>
 <body>
 <a-layout id="app" v-cloak>
@@ -37,6 +44,22 @@
                         </template>
                         <template slot="enable" slot-scope="text, record">
                             <a-tag :color="record.enable ? 'green' : 'red'">[[ record.enable ? '启用' : '停用' ]]</a-tag>
+                        </template>
+                        <template slot="inbounds" slot-scope="text, record">
+                            <div class="bound-inbound-cell">
+                                <span v-if="!record.inbounds || !record.inbounds.length" style="color:#999;">无</span>
+                                <template v-else>
+                                    <a-tooltip v-for="ib in record.inbounds" :key="ib.id" :title="inboundTooltip(ib)">
+                                        <a-tag :color="ib.enable ? 'blue' : 'default'">
+                                            [[ inboundLabel(ib) ]]
+                                        </a-tag>
+                                    </a-tooltip>
+                                </template>
+                            </div>
+                        </template>
+                        <template slot="remark" slot-scope="text, record">
+                            <span v-if="record.remark">[[ record.remark ]]</span>
+                            <span v-else style="color:#999;">-</span>
                         </template>
                         <template slot="action" slot-scope="text, record">
                             <a-button type="link" @click="openEdit(record)">编辑</a-button>
@@ -77,7 +100,8 @@
         { title: '被封禁IP', scopedSlots: { customRender: 'banned' }, width: 100 },
         { title: '排序', dataIndex: 'sortOrder', width: 70 },
         { title: '启用', scopedSlots: { customRender: 'enable' }, width: 80 },
-        { title: '备注', dataIndex: 'remark' },
+        { title: '绑定入站', scopedSlots: { customRender: 'inbounds' }, width: 320 },
+        { title: '备注', scopedSlots: { customRender: 'remark' }, width: 100 },
         { title: '操作', scopedSlots: { customRender: 'action' }, width: 140 },
     ];
 
@@ -96,6 +120,28 @@
             },
         },
         methods: {
+            inboundLabel(ib) {
+                const name = (ib.remark || '').trim() || ('#' + ib.id);
+                let s = name + ' · :' + ib.port;
+                if (ib.socksProxyId > 0) {
+                    s += ' · SOCKS#' + ib.socksProxyId;
+                }
+                return s;
+            },
+            inboundTooltip(ib) {
+                const parts = [
+                    '入站 ID ' + ib.id,
+                    '协议 ' + ib.protocol,
+                    '端口 ' + ib.port,
+                    ib.enable ? '已启用' : '已停用',
+                ];
+                if (ib.socksProxyId > 0) {
+                    parts.push('SOCKS #' + ib.socksProxyId);
+                } else {
+                    parts.push('未绑定 SOCKS');
+                }
+                return parts.join(' · ');
+            },
             async load() {
                 this.spinning = true;
                 const msg = await HttpUtil.post('/xui/game/listWithStats');

@@ -203,8 +203,13 @@ func (s *InboundService) UpdateGameId(id int, gameId int) error {
 	if err := s.checkGameId(gameId); err != nil {
 		return err
 	}
+	inbound, err := s.GetInbound(id)
+	if err != nil {
+		return err
+	}
+	inbound.GameId = gameId
 	db := database.GetDB()
-	result := db.Model(model.Inbound{}).Where("id = ?", id).Update("game_id", gameId)
+	result := db.Model(inbound).Update("game_id", gameId)
 	if result.Error != nil {
 		return result.Error
 	}

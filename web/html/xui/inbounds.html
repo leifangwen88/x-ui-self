@@ -55,12 +55,45 @@
                     </a-card>
                 </transition>
                 <transition name="list" appear>
+                    <a-card title="订阅地址" style="margin-bottom: 16px;" v-if="subInfo.token">
+                        <template slot="extra">
+                            <a-button size="small" @click="loadSubInfo">刷新</a-button>
+                            <a-button size="small" type="danger" ghost @click="resetSubToken">重置密钥</a-button>
+                        </template>
+                        <p style="color:#666;margin-bottom:12px;">
+                            将下方 URL 填入小火箭、Clash 等客户端的「订阅」；仅包含<b>已启用</b>且支持链接的入站。
+                            订阅密钥请勿泄露。
+                        </p>
+                        <a-form layout="vertical">
+                            <a-form-item label="订阅节点域名（可选）" style="margin-bottom:12px;">
+                                <a-input v-model.trim="subHostInput" placeholder="留空则使用访问订阅时的域名，如：game.example.com"
+                                         @blur="saveSubHost" @pressEnter="saveSubHost"></a-input>
+                            </a-form-item>
+                        </a-form>
+                        <a-list size="small" bordered :data-source="subUrlList">
+                            <a-list-item slot="renderItem" slot-scope="item">
+                                <a-list-item-meta :title="item.label" :description="subFullUrl(item.path)"></a-list-item-meta>
+                                <a-button type="link" size="small" @click="copyText(subFullUrl(item.path))">复制</a-button>
+                            </a-list-item>
+                        </a-list>
+                    </a-card>
+                </transition>
+                <transition name="list" appear>
                     <a-card hoverable>
                         <template slot="title">
                             <a-space>
                                 <a-button type="primary" icon="plus" @click="openAddInbound"></a-button>
                                 <a-button @click="batchResetTraffic">批量重置</a-button>
-                                <a-button @click="batchExport">批量导出</a-button>
+                                <a-dropdown>
+                                    <a-menu slot="overlay" @click="onBatchExportMenu">
+                                        <a-menu-item key="links">分享链接（文本）</a-menu-item>
+                                        <a-menu-item key="subscribe">订阅 Base64（小火箭等）</a-menu-item>
+                                        <a-menu-item key="clash">Clash 配置（YAML）</a-menu-item>
+                                    </a-menu>
+                                    <a-button>
+                                        批量导出 <a-icon type="down"></a-icon>
+                                    </a-button>
+                                </a-dropdown>
                                 <a-button @click="syncTemplateBindings">同步模板绑定</a-button>
                                 <a-button type="primary" :disabled="selectedRowKeys.length === 0"
                                           @click="openBatchRotate">
@@ -104,10 +137,10 @@
                                 <a-tag color="blue">[[ dbInbound.protocol ]]</a-tag>
                             </template>
                             <template slot="game" slot-scope="text, dbInbound">
-                                <a-select :value="dbInbound.gameId || 0"
+                                <a-select :value="gameSelectValue(dbInbound)"
                                           placeholder="选择游戏"
                                           style="width: 110px;"
-                                          @change="val => onGameChange(dbInbound, val)">
+                                          @select="val => onGameSelect(dbInbound, val)">
                                     <a-select-option :value="0">未指定</a-select-option>
                                     <a-select-option v-for="g in enabledGames" :key="g.id" :value="g.id">
                                         [[ g.name ]]
@@ -116,7 +149,7 @@
                             </template>
                             <template slot="rotate" slot-scope="text, dbInbound">
                                 <a-button size="small" type="primary"
-                                          :disabled="!dbInbound.gameId"
+                                          :disabled="!hasInboundGame(dbInbound)"
                                           @click="openRotateModal(dbInbound)">
                                     轮换
                                 </a-button>
@@ -314,8 +347,65 @@
                 mode: 'single',
                 items: [],
             },
+            subInfo: { token: '', subHost: '', base64Path: '', linksPath: '', clashPath: '' },
+            subHostInput: '',
         },
         methods: {
+            subFullUrl(path) {
+                const base = (typeof basePath !== 'undefined' ? basePath : '/');
+                const origin = location.origin;
+                const p = (path || '').replace(/^\//, '');
+                return origin + base + p;
+            },
+            copyText(text) {
+                if (navigator.clipboard && navigator.clipboard.writeText) {
+                    navigator.clipboard.writeText(text).then(() => {
+                        this.$message.success('已复制');
+                    });
+                } else {
+                    const ta = document.createElement('textarea');
+                    ta.value = text;
+                    document.body.appendChild(ta);
+                    ta.select();
+                    document.execCommand('copy');
+                    document.body.removeChild(ta);
+                    this.$message.success('已复制');
+                }
+            },
+            async loadSubInfo() {
+                const msg = await HttpUtil.post('/xui/sub/info');
+                if (msg.success && msg.obj) {
+                    this.subInfo = msg.obj;
+                    this.subHostInput = msg.obj.subHost || '';
+                }
+            },
+            async saveSubHost() {
+                const host = (this.subHostInput || '').trim();
+                if (host === (this.subInfo.subHost || '')) {
+                    return;
+                }
+                const msg = await HttpUtil.post('/xui/sub/updateHost', { subHost: host });
+                if (msg.success) {
+                    this.subInfo.subHost = host;
+                    this.$message.success('订阅域名已更新');
+                }
+            },
+            resetSubToken() {
+                this.$confirm({
+                    title: '重置订阅密钥',
+                    content: '重置后旧订阅 URL 将立即失效，需在客户端中更新订阅地址。确定继续？',
+                    okText: '重置',
+                    okType: 'danger',
+                    cancelText: '取消',
+                    onOk: async () => {
+                        const msg = await HttpUtil.post('/xui/sub/resetToken');
+                        if (msg.success) {
+                            this.$message.success('订阅密钥已重置');
+                            await this.loadSubInfo();
+                        }
+                    },
+                });
+            },
             gameName(gameId) {
                 if (!gameId) return '';
                 const g = this.games.find(x => x.id === gameId);
@@ -447,17 +537,35 @@
             onInboundSelectChange(keys) {
                 this.selectedRowKeys = keys;
             },
-            async onGameChange(dbInbound, val) {
-                const gameId = val == null ? 0 : val;
-                if (gameId === (dbInbound.gameId || 0)) {
+            gameSelectValue(dbInbound) {
+                const id = Number(dbInbound.gameId);
+                return id > 0 ? id : 0;
+            },
+            hasInboundGame(dbInbound) {
+                return Number(dbInbound.gameId) > 0;
+            },
+            async onGameSelect(dbInbound, val) {
+                const gameId = Number(val);
+                const nextId = gameId > 0 ? gameId : 0;
+                if (nextId === this.gameSelectValue(dbInbound)) {
                     return;
                 }
-                const msg = await HttpUtil.post(`/xui/inbound/updateGame/${dbInbound.id}`, {
-                    gameId: gameId,
+                const msg = await this.postSilent(`/xui/inbound/updateGame/${dbInbound.id}`, {
+                    gameId: nextId,
                 });
                 if (msg.success) {
-                    dbInbound.gameId = gameId;
-                    this.$message.success('游戏已更新');
+                    this.$set(dbInbound, 'gameId', nextId);
+                    this.$message.success(nextId > 0 ? '游戏已更新' : '已取消游戏指定');
+                } else if (msg.msg) {
+                    this.$message.error(msg.msg);
+                }
+            },
+            async postSilent(url, data) {
+                try {
+                    const resp = await axios.post(url, data);
+                    return HttpUtil._respToMsg(resp);
+                } catch (e) {
+                    return new Msg(false, e.toString());
                 }
             },
             loading(spinning=true) {
@@ -624,7 +732,7 @@
                 this.submit(`/xui/inbound/update/${dbInbound.id}`, data);
             },
             openRotateModal(dbInbound) {
-                if (!dbInbound.gameId) {
+                if (!this.hasInboundGame(dbInbound)) {
                     this.$message.warning('请先指定游戏');
                     return;
                 }
@@ -644,7 +752,7 @@
                     if (!ib) {
                         continue;
                     }
-                    if (!ib.gameId) {
+                    if (!this.hasInboundGame(ib)) {
                         skipped.push(ib.remark || ('#' + ib.id));
                         continue;
                     }
@@ -717,19 +825,65 @@
                     },
                 });
             },
-            batchExport() {
-                const lines = [];
-                for (const dbInbound of this.dbInbounds) {
-                    if (!dbInbound.enable || !dbInbound.hasLink()) {
-                        continue;
-                    }
-                    lines.push(dbInbound.genLink());
+            exportScopeHint() {
+                const n = this.selectedRowKeys.length;
+                return n > 0 ? `已勾选 ${n} 条` : '全部已启用入站';
+            },
+            onBatchExportMenu(action) {
+                const key = action.key;
+                const selected = this.selectedRowKeys.slice();
+                if (key === 'links') {
+                    this.batchExportLinks(selected);
+                } else if (key === 'subscribe') {
+                    this.batchExportSubscribe(selected);
+                } else if (key === 'clash') {
+                    this.batchExportClash(selected);
                 }
+            },
+            batchExportLinks(selectedIds) {
+                const lines = ExportUtil.genShareLinks(this.dbInbounds, selectedIds);
                 if (lines.length === 0) {
-                    this.$message.warning('没有可导出的分享链接（仅导出已启用且支持链接的入站）');
+                    this.$message.warning('没有可导出的分享链接（需已启用且支持 vmess/vless/trojan/ss）');
                     return;
                 }
-                txtModal.show('批量导出（共 ' + lines.length + ' 条）', lines.join('\r\n'), 'All-Inbounds.txt');
+                const scope = this.exportScopeHint();
+                txtModal.show(
+                    `分享链接（${lines.length} 条，${scope}）`,
+                    lines.join('\r\n'),
+                    'inbounds-links.txt'
+                );
+            },
+            batchExportSubscribe(selectedIds) {
+                const b64 = ExportUtil.genSubscriptionBase64(this.dbInbounds, selectedIds);
+                if (!b64) {
+                    this.$message.warning('没有可导出的订阅内容');
+                    return;
+                }
+                const links = ExportUtil.genShareLinks(this.dbInbounds, selectedIds);
+                const body = ExportUtil.subscriptionHint(basePath)
+                    + '\n共 ' + links.length + ' 条节点（' + this.exportScopeHint() + '）\n\n'
+                    + b64;
+                txtModal.show(
+                    `订阅 Base64（${links.length} 条）`,
+                    body,
+                    'subscription-base64.txt'
+                );
+            },
+            batchExportClash(selectedIds) {
+                const result = ExportUtil.genClashYaml(this.dbInbounds, selectedIds);
+                if (!result.count) {
+                    this.$message.warning('没有可导出为 Clash 的入站');
+                    return;
+                }
+                let note = '# 共 ' + result.count + ' 个节点（' + this.exportScopeHint() + '）\n';
+                if (result.skipped.length) {
+                    note += '# 以下入站未纳入（协议不支持或配置异常）：' + result.skipped.join('、') + '\n\n';
+                }
+                txtModal.show(
+                    `Clash 配置（${result.count} 节点）`,
+                    note + result.yaml,
+                    'clash.yaml'
+                );
             },
             async syncTemplateBindings() {
                 const msg = await HttpUtil.post('/xui/socks/syncTemplate');
@@ -757,8 +911,19 @@
         mounted() {
             this.loadSocksMap();
             this.getDBInbounds();
+            this.loadSubInfo();
         },
         computed: {
+            subUrlList() {
+                if (!this.subInfo.token) {
+                    return [];
+                }
+                return [
+                    { key: 'base64', label: '通用订阅（小火箭 / Surge / QX 等）', path: this.subInfo.base64Path },
+                    { key: 'clash', label: 'Clash / Mihomo 订阅', path: this.subInfo.clashPath },
+                    { key: 'links', label: '纯文本链接', path: this.subInfo.linksPath },
+                ];
+            },
             enabledGames() {
                 return (this.games || []).filter(g => g.enable);
             },

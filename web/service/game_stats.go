@@ -9,9 +9,19 @@ type GameIpStats struct {
 	BannedCount    int `json:"bannedCount"`
 }
 
+type GameBoundInbound struct {
+	Id           int    `json:"id"`
+	Remark       string `json:"remark"`
+	Port         int    `json:"port"`
+	Protocol     string `json:"protocol"`
+	Enable       bool   `json:"enable"`
+	SocksProxyId int    `json:"socksProxyId"`
+}
+
 type GameWithStats struct {
 	*model.Game
-	Stats GameIpStats `json:"stats"`
+	Stats    GameIpStats          `json:"stats"`
+	Inbounds []GameBoundInbound   `json:"inbounds"`
 }
 
 func (s *GameService) ListWithStats() ([]*GameWithStats, error) {
@@ -29,6 +39,26 @@ func (s *GameService) ListWithStats() ([]*GameWithStats, error) {
 	if err != nil {
 		return nil, err
 	}
+	inboundService := InboundService{}
+	allInbounds, err := inboundService.GetAllInbounds()
+	if err != nil {
+		return nil, err
+	}
+	inboundsByGame := make(map[int][]GameBoundInbound)
+	for _, ib := range allInbounds {
+		if ib.GameId <= 0 {
+			continue
+		}
+		inboundsByGame[ib.GameId] = append(inboundsByGame[ib.GameId], GameBoundInbound{
+			Id:           ib.Id,
+			Remark:       ib.Remark,
+			Port:         ib.Port,
+			Protocol:     string(ib.Protocol),
+			Enable:       ib.Enable,
+			SocksProxyId: ib.SocksProxyId,
+		})
+	}
+
 	statusMap := make(map[int]map[int]*model.SocksGameStatus)
 	bannedPerGame := make(map[int]int)
 	for _, st := range statuses {
@@ -65,9 +95,14 @@ func (s *GameService) ListWithStats() ([]*GameWithStats, error) {
 				stats.FreshAvailable++
 			}
 		}
+		bound := inboundsByGame[game.Id]
+		if bound == nil {
+			bound = []GameBoundInbound{}
+		}
 		result = append(result, &GameWithStats{
-			Game:  game,
-			Stats: stats,
+			Game:     game,
+			Stats:    stats,
+			Inbounds: bound,
 		})
 	}
 	return result, nil

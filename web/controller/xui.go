@@ -33,6 +33,7 @@ func (a *XUIController) initRouter(g *gin.RouterGroup) {
 	a.settingController = NewSettingController(g)
 	a.socksProxyController = NewSocksProxyController(g)
 	a.gameController = NewGameController(g)
+	NewSubManageController(g)
 }
 
 func (a *XUIController) index(c *gin.Context) {

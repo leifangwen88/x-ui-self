@@ -25,6 +25,7 @@ type IndexController struct {
 func NewIndexController(g *gin.RouterGroup) *IndexController {
 	a := &IndexController{}
 	a.initRouter(g)
+	NewSubscriptionController(g)
 	return a
 }
 
