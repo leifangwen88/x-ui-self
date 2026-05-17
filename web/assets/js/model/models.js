@@ -45,6 +45,10 @@ class DBInbound {
         this.tag = "";
         this.sniffing = "";
         this.socksProxyId = 0;
+        this.gameId = 0;
+        this.rotationEnable = false;
+        this.rotationPolicy = 'prefer_unused_unbanned';
+        this.lastRotatedAt = 0;
 
         if (data == null) {
             return;

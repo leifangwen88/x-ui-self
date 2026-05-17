@@ -21,6 +21,10 @@
     .socks-filter-bar .ant-form-item {
         margin-bottom: 8px;
     }
+
+    .socks-inbound-bind {
+        min-width: 200px;
+    }
 </style>
 <body>
 <a-layout id="app" v-cloak>
@@ -35,7 +39,8 @@
                     <a-form layout="inline" style="margin-top: 12px;">
                         <a-form-item label="本批到期时间">
                             <a-date-picker :show-time="{ format: 'HH:mm' }" format="YYYY-MM-DD HH:mm"
-                                           v-model="importExpiryTime" placeholder="留空表示永不到期"
+                                           v-model="importExpiryTime" :locale="datePickerLocale"
+                                           allow-clear placeholder="清空表示永不到期"
                                            style="width: 220px;"></a-date-picker>
                         </a-form-item>
                         <a-form-item>
@@ -119,13 +124,37 @@
                                 <a-tag v-else-if="isExpired(record)" color="red">[[ formatTime(record.expiryTime) ]]</a-tag>
                                 <a-tag v-else color="blue">[[ formatTime(record.expiryTime) ]]</a-tag>
                             </template>
+                            <template slot="gameMark" slot-scope="text, record">
+                                <a-dropdown :trigger="['click']">
+                                    <a @click="e => e.preventDefault()">
+                                        <a-tag v-for="t in usedGameTags(record)" :key="'u'+t" color="blue" style="margin:2px;">[[ t ]]·用过</a-tag>
+                                        <a-tag v-for="t in bannedGameTags(record)" :key="'b'+t" color="red" style="margin:2px;">[[ t ]]·封禁</a-tag>
+                                        <span v-if="!usedGameTags(record).length && !bannedGameTags(record).length"
+                                              style="color:#999;">设置标记</span>
+                                    </a>
+                                    <a-menu slot="overlay" @click="a => onGameMarkMenu(a, record)">
+                                        <template v-for="g in games">
+                                            <a-menu-item :key="g.id + ':used'">[[ g.name ]] → 标记「用过」</a-menu-item>
+                                            <a-menu-item :key="g.id + ':banned'">[[ g.name ]] → 标记「封禁过」</a-menu-item>
+                                            <a-menu-item v-if="isGameBanned(record.id, g.id) || isGameUsed(record.id, g.id)"
+                                                         :key="g.id + ':clear'">[[ g.name ]] → 清除标记</a-menu-item>
+                                        </template>
+                                    </a-menu>
+                                </a-dropdown>
+                            </template>
                             <template slot="inbound" slot-scope="text, record">
-                                <template v-if="inboundMap[record.id] && inboundMap[record.id].length">
-                                    <a-tag v-for="ib in inboundMap[record.id]" :key="ib.id" color="purple">
-                                        [[ ib.remark || ('端口 ' + ib.port) ]]
-                                    </a-tag>
-                                </template>
-                                <span v-else style="color:#999;">未绑定入站</span>
+                                <a-select class="socks-inbound-bind"
+                                          :value="boundInboundId(record)"
+                                          placeholder="选择入站绑定"
+                                          allow-clear
+                                          show-search
+                                          :filter-option="filterInboundOption"
+                                          @change="val => onInboundBindChange(record, val)">
+                                    <a-select-option :value="0">不绑定入站</a-select-option>
+                                    <a-select-option v-for="ib in selectableInbounds(record.id)" :key="ib.id" :value="ib.id">
+                                        [[ inboundOptionLabel(ib) ]]
+                                    </a-select-option>
+                                </a-select>
                             </template>
                         </a-table>
                     </div>
@@ -169,6 +198,11 @@
     }, {
         title: '绑定的入站',
         scopedSlots: { customRender: 'inbound' },
+        width: 240,
+    }, {
+        title: '游戏标记',
+        scopedSlots: { customRender: 'gameMark' },
+        width: 220,
     }];
 
     const app = new Vue({
@@ -180,12 +214,17 @@
             importing: false,
             syncing: false,
             importText: '',
-            importExpiryTime: null,
+            importExpiryTime: SocksUtil.defaultImportExpiry(),
+            datePickerLocale: typeof datePickerLocale !== 'undefined' ? datePickerLocale : {},
             importResult: null,
             socksList: [],
             remarkCache: {},
             selectedRowKeys: [],
             inboundMap: {},
+            games: [],
+            gameStatusMap: {},
+            allInbounds: [],
+            allInbounds: [],
             filterBind: 'all',
             filterExpiry: 'all',
             sortBy: 'createdDesc',
@@ -251,11 +290,84 @@
                 }
                 this.inboundMap = map;
             },
+            buildGameStatusMap(statuses) {
+                const map = {};
+                for (const st of (statuses || [])) {
+                    if (!map[st.socksProxyId]) map[st.socksProxyId] = {};
+                    map[st.socksProxyId][st.gameId] = st;
+                }
+                this.gameStatusMap = map;
+            },
+            isGameBanned(socksId, gameId) {
+                const m = this.gameStatusMap[socksId];
+                return m && m[gameId] && m[gameId].status === 'banned';
+            },
+            isGameUsed(socksId, gameId) {
+                const m = this.gameStatusMap[socksId];
+                if (!m || !m[gameId] || m[gameId].status === 'banned') {
+                    return false;
+                }
+                const st = m[gameId];
+                return st.useCount > 0 || st.status === 'used';
+            },
+            usedGameTags(record) {
+                const tags = [];
+                for (const g of this.games) {
+                    if (this.isGameUsed(record.id, g.id)) {
+                        tags.push(g.name);
+                    }
+                }
+                return tags;
+            },
+            bannedGameTags(record) {
+                const tags = [];
+                for (const g of this.games) {
+                    if (this.isGameBanned(record.id, g.id)) {
+                        tags.push(g.name);
+                    }
+                }
+                return tags;
+            },
+            async onGameMarkMenu(action, record) {
+                const key = action.key;
+                if (!key || key.indexOf(':') < 0) {
+                    return;
+                }
+                const parts = key.split(':');
+                const gameId = parseInt(parts[0], 10);
+                const op = parts[1];
+                if (op === 'used') {
+                    await this.setGameMark(record.id, gameId, 'used');
+                } else if (op === 'banned') {
+                    await this.setGameMark(record.id, gameId, 'banned');
+                } else if (op === 'clear') {
+                    await this.setGameMark(record.id, gameId, 'clear');
+                }
+            },
+            async setGameMark(socksId, gameId, mark) {
+                const msg = await HttpUtil.post('/xui/socks/setGameMark', {
+                    socksProxyId: socksId,
+                    gameId: gameId,
+                    mark: mark,
+                });
+                if (msg.success) {
+                    this.$message.success('标记已保存');
+                    await this.loadGameStatuses();
+                }
+            },
+            async loadGameStatuses() {
+                const msg = await HttpUtil.post('/xui/socks/gameStatuses');
+                if (msg.success) {
+                    this.buildGameStatusMap(msg.obj);
+                }
+            },
             async loadAll() {
                 this.loading(true);
-                const [socksMsg, inboundMsg] = await Promise.all([
+                const [socksMsg, inboundMsg, gameMsg, statusMsg] = await Promise.all([
                     HttpUtil.post('/xui/socks/list'),
                     HttpUtil.post('/xui/inbound/list'),
+                    HttpUtil.post('/xui/game/list'),
+                    HttpUtil.post('/xui/socks/gameStatuses'),
                 ]);
                 this.loading(false);
                 if (socksMsg.success) {
@@ -266,8 +378,15 @@
                     }
                     this.remarkCache = cache;
                 }
+                if (gameMsg.success) {
+                    this.games = gameMsg.obj || [];
+                }
+                if (statusMsg.success) {
+                    this.buildGameStatusMap(statusMsg.obj);
+                }
                 if (inboundMsg.success) {
-                    this.buildInboundMap(inboundMsg.obj || []);
+                    this.allInbounds = inboundMsg.obj || [];
+                    this.buildInboundMap(this.allInbounds);
                 }
                 this.page = 1;
             },
@@ -288,6 +407,7 @@
                 if (msg.success) {
                     this.importResult = msg.obj;
                     this.importText = '';
+                    this.importExpiryTime = SocksUtil.defaultImportExpiry();
                     await this.loadAll();
                 }
             },
@@ -300,6 +420,69 @@
                     Vue.prototype.$message.success(
                         `同步完成：新建 SOCKS ${r.socksCreated}，匹配 ${r.socksMatched}，绑定入站 ${r.inboundBound}，跳过 ${r.inboundSkipped}`
                     );
+                    await this.loadAll();
+                }
+            },
+            boundInboundId(socks) {
+                const list = this.inboundMap[socks.id];
+                if (!list || !list.length) {
+                    return 0;
+                }
+                return list[0].id;
+            },
+            selectableInbounds(socksId) {
+                let list = SocksUtil.filterSelectableInbounds(this.allInbounds, socksId);
+                return list.filter(ib => {
+                    if (!ib.gameId) {
+                        return true;
+                    }
+                    if (ib.socksProxyId === socksId) {
+                        return true;
+                    }
+                    return !this.isGameBanned(socksId, ib.gameId);
+                });
+            },
+            inboundOptionLabel(ib) {
+                return SocksUtil.formatInboundOptionLabel(ib);
+            },
+            filterInboundOption(input, option) {
+                const text = (option.componentOptions && option.componentOptions.children
+                    && option.componentOptions.children[0]
+                    && option.componentOptions.children[0].text) || '';
+                return text.toLowerCase().indexOf((input || '').toLowerCase()) >= 0;
+            },
+            async setInboundSocks(inboundId, socksProxyId) {
+                return HttpUtil.post(`/xui/inbound/updateSocks/${inboundId}`, { socksProxyId: socksProxyId });
+            },
+            async onInboundBindChange(socks, val) {
+                const inboundId = val == null ? 0 : val;
+                const currentId = this.boundInboundId(socks);
+                if (inboundId === currentId) {
+                    return;
+                }
+                if (inboundId === 0) {
+                    if (currentId > 0) {
+                        const msg = await this.setInboundSocks(currentId, 0);
+                        if (msg.success) {
+                            this.$message.success('已解除入站绑定');
+                            await this.loadAll();
+                        }
+                    }
+                    return;
+                }
+                const boundList = this.inboundMap[socks.id] || [];
+                for (const ib of boundList) {
+                    if (ib.id !== inboundId) {
+                        await this.setInboundSocks(ib.id, 0);
+                    }
+                }
+                const target = this.allInbounds.find(ib => ib.id === inboundId);
+                if (target && target.socksProxyId > 0 && target.socksProxyId !== socks.id) {
+                    await this.setInboundSocks(inboundId, 0);
+                }
+                const msg = await this.setInboundSocks(inboundId, socks.id);
+                if (msg.success) {
+                    this.$message.success('入站绑定已更新');
                     await this.loadAll();
                 }
             },

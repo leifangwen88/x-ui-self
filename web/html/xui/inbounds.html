@@ -81,6 +81,9 @@
                                         <a-menu-item v-if="dbInbound.hasLink()" key="exportLink">
                                             <a-icon type="copy"></a-icon>导出链接
                                         </a-menu-item>
+                                        <a-menu-item v-if="dbInbound.gameId" key="rotate">
+                                            <a-icon type="swap"></a-icon>轮换 IP
+                                        </a-menu-item>
                                         <a-menu-item key="edit">
                                             <a-icon type="edit"></a-icon>编辑
                                         </a-menu-item>
@@ -98,6 +101,10 @@
                             <template slot="protocol" slot-scope="text, dbInbound">
                                 <a-tag color="blue">[[ dbInbound.protocol ]]</a-tag>
                             </template>
+                            <template slot="game" slot-scope="text, dbInbound">
+                                <a-tag v-if="gameName(dbInbound.gameId)" color="orange">[[ gameName(dbInbound.gameId) ]]</a-tag>
+                                <span v-else style="color:#999;">未指定</span>
+                            </template>
                             <template slot="socks" slot-scope="text, dbInbound">
                                 <div class="socks-cell">
                                     <a-select :value="dbInbound.socksProxyId || 0"
@@ -107,7 +114,7 @@
                                               :filter-option="filterSocksOption"
                                               @change="val => onSocksProxyChange(dbInbound, val)">
                                         <a-select-option :value="0">未绑定</a-select-option>
-                                        <a-select-option v-for="s in socksList" :key="s.id" :value="s.id">
+                                        <a-select-option v-for="s in selectableSocks(dbInbound)" :key="s.id" :value="s.id">
                                             [[ socksOptionLabel(s) ]]
                                         </a-select-option>
                                     </a-select>
@@ -168,6 +175,28 @@
                     </a-card>
                 </transition>
             </a-spin>
+            <a-modal v-model="rotateModal.visible" title="轮换 IP" :closable="!rotateModal.loading"
+                     :mask-closable="false" @ok="confirmRotate" :confirm-loading="rotateModal.loading"
+                     ok-text="确认轮换" cancel-text="取消">
+                <p v-if="rotateModal.dbInbound">
+                    游戏：<b>[[ gameName(rotateModal.dbInbound.gameId) ]]</b>
+                    <span v-if="rotateModal.dbInbound.socksProxyId">
+                        ，当前 SOCKS：<b>#[[ rotateModal.dbInbound.socksProxyId ]]</b>
+                    </span>
+                    <span v-else>，当前未绑定 SOCKS</span>
+                </p>
+                <a-alert v-if="rotateModal.dbInbound && rotateModal.dbInbound.socksProxyId" type="warning"
+                         show-icon style="margin: 12px 0;"
+                         message="必须先标记即将弃用的 IP（不可跳过）"></a-alert>
+                <div v-if="rotateModal.dbInbound && rotateModal.dbInbound.socksProxyId">
+                    <div style="margin-bottom:8px;"><span style="color:#f5222d;">*</span> 对当前 IP 的标记：</div>
+                    <a-radio-group v-model="rotateModal.outgoingMark">
+                        <a-radio value="used" style="display:block;margin:8px 0;">用过（该游戏仍可用，可进轮换池）</a-radio>
+                        <a-radio value="banned" style="display:block;margin:8px 0;">封禁过（该游戏不再使用此 IP）</a-radio>
+                    </a-radio-group>
+                </div>
+                <p v-else style="color:#666;margin-top:8px;">将自动选择未过期、未封禁的 IP（优先全新）。</p>
+            </a-modal>
         </a-layout-content>
     </a-layout>
 </a-layout>
@@ -204,6 +233,11 @@
         align: 'center',
         dataIndex: "port",
         width: 60,
+    }, {
+        title: "游戏",
+        align: 'center',
+        width: 90,
+        scopedSlots: { customRender: 'game' },
     }, {
         title: "SOCKS5",
         align: 'center',
@@ -243,8 +277,41 @@
             socksMap: {},
             socksList: [],
             socksRemarkCache: {},
+            games: [],
+            gameStatusMap: {},
+            rotateModal: {
+                visible: false,
+                loading: false,
+                dbInbound: null,
+                outgoingMark: '',
+            },
         },
         methods: {
+            gameName(gameId) {
+                if (!gameId) return '';
+                const g = this.games.find(x => x.id === gameId);
+                return g ? g.name : ('#' + gameId);
+            },
+            isSocksBannedForGame(socksId, gameId) {
+                const m = this.gameStatusMap[socksId];
+                return m && m[gameId] && m[gameId].status === 'banned';
+            },
+            isSocksUsedForGame(socksId, gameId) {
+                const m = this.gameStatusMap[socksId];
+                if (!m || !m[gameId] || m[gameId].status === 'banned') {
+                    return false;
+                }
+                const st = m[gameId];
+                return st.useCount > 0 || st.status === 'used';
+            },
+            buildGameStatusMap(statuses) {
+                const map = {};
+                for (const st of (statuses || [])) {
+                    if (!map[st.socksProxyId]) map[st.socksProxyId] = {};
+                    map[st.socksProxyId][st.gameId] = st;
+                }
+                this.gameStatusMap = map;
+            },
             boundSocks(dbInbound) {
                 const id = dbInbound.socksProxyId;
                 if (!id) {
@@ -261,17 +328,25 @@
                 }
                 return DateUtil.formatMillis(s.expiryTime);
             },
+            selectableSocks(dbInbound) {
+                let list = SocksUtil.filterSelectable(
+                    this.socksList,
+                    this.dbInbounds,
+                    dbInbound.id,
+                    dbInbound.socksProxyId
+                );
+                if (!dbInbound.gameId) {
+                    return list;
+                }
+                return list.filter(s => {
+                    if (s.id === dbInbound.socksProxyId) {
+                        return true;
+                    }
+                    return !this.isSocksBannedForGame(s.id, dbInbound.gameId);
+                });
+            },
             socksOptionLabel(s) {
-                const parts = [`#${s.id} ${s.address}:${s.port}`];
-                if (s.remark) {
-                    parts.push(s.remark);
-                }
-                if (s.expiryTime > 0) {
-                    parts.push(this.isSocksExpired(s) ? '已到期' : this.formatSocksExpiry(s));
-                } else {
-                    parts.push('无期限');
-                }
-                return parts.join(' · ');
+                return SocksUtil.formatOptionLabel(s);
             },
             filterSocksOption(input, option) {
                 const text = (option.componentOptions && option.componentOptions.children
@@ -280,11 +355,21 @@
                 return text.toLowerCase().indexOf((input || '').toLowerCase()) >= 0;
             },
             async loadSocksMap() {
-                const msg = await HttpUtil.post('/xui/socks/list');
-                if (!msg.success) {
+                const [socksMsg, gameMsg, statusMsg] = await Promise.all([
+                    HttpUtil.post('/xui/socks/list'),
+                    HttpUtil.post('/xui/game/list'),
+                    HttpUtil.post('/xui/socks/gameStatuses'),
+                ]);
+                if (gameMsg.success) {
+                    this.games = gameMsg.obj || [];
+                }
+                if (statusMsg.success) {
+                    this.buildGameStatusMap(statusMsg.obj);
+                }
+                if (!socksMsg.success) {
                     return;
                 }
-                const list = msg.obj || [];
+                const list = socksMsg.obj || [];
                 const map = {};
                 const cache = {};
                 for (const s of list) {
@@ -306,6 +391,7 @@
                 if (msg.success) {
                     dbInbound.socksProxyId = socksProxyId;
                     this.$message.success(socksProxyId ? 'SOCKS 绑定已更新' : '已解除 SOCKS 绑定');
+                    await this.getDBInbounds();
                 }
             },
             async saveSocksRemark(socks) {
@@ -370,6 +456,9 @@
                     case "exportLink":
                         this.exportInboundLink(dbInbound);
                         break;
+                    case "rotate":
+                        this.openRotateModal(dbInbound);
+                        break;
                     case "edit":
                         this.openEditInbound(dbInbound);
                         break;
@@ -422,6 +511,7 @@
                     streamSettings: inbound.stream.toString(),
                     sniffing: inbound.canSniffing() ? inbound.sniffing.toString() : '{}',
                     socksProxyId: dbInbound.socksProxyId || 0,
+                    gameId: dbInbound.gameId || 0,
                 };
                 await this.submit('/xui/inbound/add', data, inModal);
             },
@@ -441,6 +531,7 @@
                     streamSettings: inbound.stream.toString(),
                     sniffing: inbound.canSniffing() ? inbound.sniffing.toString() : '{}',
                     socksProxyId: dbInbound.socksProxyId || 0,
+                    gameId: dbInbound.gameId || 0,
                 };
                 await this.submit(`/xui/inbound/update/${dbInbound.id}`, data, inModal);
             },
@@ -486,8 +577,42 @@
             switchEnable(dbInbound) {
                 const data = Object.assign({}, dbInbound, {
                     socksProxyId: dbInbound.socksProxyId || 0,
+                    gameId: dbInbound.gameId || 0,
                 });
                 this.submit(`/xui/inbound/update/${dbInbound.id}`, data);
+            },
+            openRotateModal(dbInbound) {
+                if (!dbInbound.gameId) {
+                    this.$message.warning('请先为入站绑定游戏');
+                    return;
+                }
+                this.rotateModal.dbInbound = dbInbound;
+                this.rotateModal.outgoingMark = '';
+                this.rotateModal.visible = true;
+            },
+            async confirmRotate() {
+                const dbInbound = this.rotateModal.dbInbound;
+                if (!dbInbound || !dbInbound.gameId) {
+                    return;
+                }
+                if (dbInbound.socksProxyId > 0 &&
+                    this.rotateModal.outgoingMark !== 'used' &&
+                    this.rotateModal.outgoingMark !== 'banned') {
+                    this.$message.warning('请选择对当前 IP 的标记：用过 或 封禁过');
+                    return;
+                }
+                this.rotateModal.loading = true;
+                const msg = await HttpUtil.post(`/xui/inbound/rotate/${dbInbound.id}`, {
+                    outgoingMark: this.rotateModal.outgoingMark,
+                });
+                this.rotateModal.loading = false;
+                if (msg.success) {
+                    const r = msg.obj;
+                    this.rotateModal.visible = false;
+                    this.$message.success(`已轮换：SOCKS #${r.fromSocksId || 0} → #${r.toSocksId}`);
+                    await this.loadSocksMap();
+                    await this.getDBInbounds();
+                }
             },
             batchResetTraffic() {
                 this.$confirm({

@@ -41,6 +41,14 @@ func initSocksProxy() error {
 	return db.AutoMigrate(&model.SocksProxy{})
 }
 
+func initGame() error {
+	return db.AutoMigrate(&model.Game{})
+}
+
+func initSocksGame() error {
+	return db.AutoMigrate(&model.SocksGameStatus{}, &model.SocksRotationLog{})
+}
+
 func initSetting() error {
 	return db.AutoMigrate(&model.Setting{})
 }
@@ -81,6 +89,14 @@ func InitDB(dbPath string) error {
 		return err
 	}
 	err = initSocksProxy()
+	if err != nil {
+		return err
+	}
+	err = initGame()
+	if err != nil {
+		return err
+	}
+	err = initSocksGame()
 	if err != nil {
 		return err
 	}

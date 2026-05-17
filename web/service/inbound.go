@@ -59,6 +59,12 @@ func (s *InboundService) AddInbound(inbound *model.Inbound) error {
 	if err = s.checkSocksProxyId(inbound.SocksProxyId); err != nil {
 		return err
 	}
+	if err = s.checkGameId(inbound.GameId); err != nil {
+		return err
+	}
+	if inbound.RotationPolicy == "" {
+		inbound.RotationPolicy = model.RotationPolicyPreferUnusedUnbanned
+	}
 	db := database.GetDB()
 	return db.Save(inbound).Error
 }
@@ -138,7 +144,15 @@ func (s *InboundService) UpdateInbound(inbound *model.Inbound) error {
 	if err = s.checkSocksProxyId(inbound.SocksProxyId); err != nil {
 		return err
 	}
+	if err = s.checkGameId(inbound.GameId); err != nil {
+		return err
+	}
 	oldInbound.SocksProxyId = inbound.SocksProxyId
+	oldInbound.GameId = inbound.GameId
+	oldInbound.RotationEnable = inbound.RotationEnable
+	if inbound.RotationPolicy != "" {
+		oldInbound.RotationPolicy = inbound.RotationPolicy
+	}
 	oldInbound.Tag = fmt.Sprintf("inbound-%v", inbound.Port)
 
 	db := database.GetDB()
@@ -186,8 +200,23 @@ func (s *InboundService) AddTraffic(traffics []*xray.Traffic) (err error) {
 }
 
 func (s *InboundService) UpdateSocksProxyId(id int, socksProxyId int) error {
+	inbound, err := s.GetInbound(id)
+	if err != nil {
+		return err
+	}
 	if err := s.checkSocksProxyId(socksProxyId); err != nil {
 		return err
+	}
+	if socksProxyId > 0 {
+		inbounds, err := s.GetAllInbounds()
+		if err != nil {
+			return err
+		}
+		for _, ib := range inbounds {
+			if ib.Id != id && ib.SocksProxyId == socksProxyId {
+				return common.NewError("该 SOCKS 已绑定其他入站")
+			}
+		}
 	}
 	db := database.GetDB()
 	result := db.Model(model.Inbound{}).Where("id = ?", id).Update("socks_proxy_id", socksProxyId)
@@ -196,6 +225,22 @@ func (s *InboundService) UpdateSocksProxyId(id int, socksProxyId int) error {
 	}
 	if result.RowsAffected == 0 {
 		return common.NewError("入站不存在:", id)
+	}
+	if socksProxyId > 0 && inbound.GameId > 0 {
+		socksGame := SocksGameService{}
+		_ = socksGame.RecordUsage(socksProxyId, inbound.GameId)
+	}
+	return nil
+}
+
+func (s *InboundService) checkGameId(gameId int) error {
+	if gameId <= 0 {
+		return nil
+	}
+	gameService := GameService{}
+	_, err := gameService.GetById(gameId)
+	if err != nil {
+		return common.NewError("游戏不存在:", gameId)
 	}
 	return nil
 }

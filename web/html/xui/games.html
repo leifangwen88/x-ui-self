@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+{{template "head" .}}
+<style>
+    @media (min-width: 769px) {
+        .ant-layout-content { margin: 24px 16px; }
+    }
+    .stat-fresh { color: #52c41a; font-weight: 600; }
+    .stat-old { color: #1890ff; font-weight: 600; }
+    .stat-banned { color: #f5222d; font-weight: 600; }
+</style>
+<body>
+<a-layout id="app" v-cloak>
+    {{ template "commonSider" . }}
+    <a-layout id="content-layout">
+        <a-layout-content>
+            <a-spin :spinning="spinning">
+                <a-card title="游戏管理">
+                    <template slot="extra">
+                        <a-button @click="load" style="margin-right:8px;">刷新统计</a-button>
+                        <a-button type="primary" @click="openEdit()">添加游戏</a-button>
+                    </template>
+                    <p style="color:#666;margin-bottom:12px;">
+                        游戏数量不限。IP 对游戏有两档标记：<b>用过</b>、<b>封禁过</b>。
+                        轮换池：未过期且在该游戏<b>未封禁</b>的 IP 均可参与（含用过）。
+                        统计仅计<b>未过期</b>的可用 IP；封禁数含已过期 IP。
+                    </p>
+                    <a-table :columns="columns" :data-source="games" :row-key="g => g.id" :pagination="false">
+                        <template slot="fresh" slot-scope="text, record">
+                            <span class="stat-fresh">[[ record.stats.freshAvailable ]]</span>
+                        </template>
+                        <template slot="old" slot-scope="text, record">
+                            <span class="stat-old">[[ record.stats.oldAvailable ]]</span>
+                        </template>
+                        <template slot="banned" slot-scope="text, record">
+                            <span class="stat-banned">[[ record.stats.bannedCount ]]</span>
+                        </template>
+                        <template slot="enable" slot-scope="text, record">
+                            <a-tag :color="record.enable ? 'green' : 'red'">[[ record.enable ? '启用' : '停用' ]]</a-tag>
+                        </template>
+                        <template slot="action" slot-scope="text, record">
+                            <a-button type="link" @click="openEdit(record)">编辑</a-button>
+                            <a-button type="link" style="color:#f5222d;" @click="delGame(record)">删除</a-button>
+                        </template>
+                    </a-table>
+                </a-card>
+            </a-spin>
+            <a-modal v-model="modal.visible" :title="modal.title" @ok="saveGame" :confirm-loading="modal.loading">
+                <a-form layout="vertical">
+                    <a-form-item label="游戏名称" required>
+                        <a-input v-model.trim="modal.game.name" placeholder="如：游戏A"></a-input>
+                    </a-form-item>
+                    <a-form-item label="代码（可选）">
+                        <a-input v-model.trim="modal.game.code" placeholder="英文标识，留空自动生成"></a-input>
+                    </a-form-item>
+                    <a-form-item label="排序">
+                        <a-input-number v-model="modal.game.sortOrder" :min="0" style="width:100%;"></a-input-number>
+                    </a-form-item>
+                    <a-form-item label="启用">
+                        <a-switch v-model="modal.game.enable"></a-switch>
+                    </a-form-item>
+                    <a-form-item label="备注">
+                        <a-input v-model.trim="modal.game.remark"></a-input>
+                    </a-form-item>
+                </a-form>
+            </a-modal>
+        </a-layout-content>
+    </a-layout>
+</a-layout>
+{{template "js" .}}
+<script>
+    const columns = [
+        { title: 'ID', dataIndex: 'id', width: 60 },
+        { title: '名称', dataIndex: 'name', width: 120 },
+        { title: '可用全新IP', scopedSlots: { customRender: 'fresh' }, width: 110 },
+        { title: '可用旧IP', scopedSlots: { customRender: 'old' }, width: 100 },
+        { title: '被封禁IP', scopedSlots: { customRender: 'banned' }, width: 100 },
+        { title: '排序', dataIndex: 'sortOrder', width: 70 },
+        { title: '启用', scopedSlots: { customRender: 'enable' }, width: 80 },
+        { title: '备注', dataIndex: 'remark' },
+        { title: '操作', scopedSlots: { customRender: 'action' }, width: 140 },
+    ];
+
+    const app = new Vue({
+        delimiters: ['[[', ']]'],
+        el: '#app',
+        data: {
+            siderDrawer,
+            spinning: false,
+            games: [],
+            modal: {
+                visible: false,
+                loading: false,
+                title: '',
+                game: { id: 0, name: '', code: '', enable: true, sortOrder: 0, remark: '' },
+            },
+        },
+        methods: {
+            async load() {
+                this.spinning = true;
+                const msg = await HttpUtil.post('/xui/game/listWithStats');
+                this.spinning = false;
+                if (msg.success) {
+                    this.games = msg.obj || [];
+                }
+            },
+            openEdit(record) {
+                if (record) {
+                    this.modal.title = '编辑游戏';
+                    this.modal.game = {
+                        id: record.id,
+                        name: record.name,
+                        code: record.code,
+                        enable: record.enable,
+                        sortOrder: record.sortOrder,
+                        remark: record.remark,
+                    };
+                } else {
+                    this.modal.title = '添加游戏';
+                    this.modal.game = { id: 0, name: '', code: '', enable: true, sortOrder: 0, remark: '' };
+                }
+                this.modal.visible = true;
+            },
+            async saveGame() {
+                if (!this.modal.game.name) {
+                    this.$message.warning('请填写游戏名称');
+                    return;
+                }
+                this.modal.loading = true;
+                const g = this.modal.game;
+                const url = g.id ? `/xui/game/update/${g.id}` : '/xui/game/add';
+                const msg = await HttpUtil.post(url, g);
+                this.modal.loading = false;
+                if (msg.success) {
+                    this.modal.visible = false;
+                    await this.load();
+                }
+            },
+            delGame(record) {
+                this.$confirm({
+                    title: '删除游戏',
+                    content: `确定删除「${record.name}」？`,
+                    okText: '删除',
+                    okType: 'danger',
+                    cancelText: '取消',
+                    onOk: async () => {
+                        const msg = await HttpUtil.post(`/xui/game/del/${record.id}`);
+                        if (msg.success) {
+                            await this.load();
+                        }
+                    },
+                });
+            },
+        },
+        mounted() {
+            this.load();
+        },
+    });
+</script>
+</body>
+</html>

@@ -42,6 +42,52 @@ type Inbound struct {
 	Tag            string   `json:"tag" form:"tag" gorm:"unique"`
 	Sniffing       string   `json:"sniffing" form:"sniffing"`
 	SocksProxyId   int      `json:"socksProxyId" form:"socksProxyId" gorm:"default:0"`
+
+	GameId           int    `json:"gameId" form:"gameId" gorm:"default:0;index"`
+	RotationEnable   bool   `json:"rotationEnable" form:"rotationEnable" gorm:"default:false"`
+	RotationPolicy   string `json:"rotationPolicy" form:"rotationPolicy" gorm:"default:prefer_unused_unbanned"`
+	LastRotatedAt    int64  `json:"lastRotatedAt"`
+}
+
+const (
+	SocksGameStatusActive = "active"
+	SocksGameStatusUsed   = "used"
+	SocksGameStatusBanned = "banned"
+
+	SocksGameMarkUsed   = "used"
+	SocksGameMarkBanned = "banned"
+
+	RotationPolicyPreferUnusedUnbanned = "prefer_unused_unbanned"
+)
+
+type Game struct {
+	Id        int    `json:"id" gorm:"primaryKey;autoIncrement"`
+	Name      string `json:"name" gorm:"unique"`
+	Code      string `json:"code" gorm:"uniqueIndex"`
+	Enable    bool   `json:"enable" gorm:"default:true"`
+	SortOrder int    `json:"sortOrder" gorm:"default:0"`
+	Remark    string `json:"remark"`
+}
+
+type SocksGameStatus struct {
+	Id           int    `json:"id" gorm:"primaryKey;autoIncrement"`
+	SocksProxyId int    `json:"socksProxyId" gorm:"uniqueIndex:idx_socks_game"`
+	GameId       int    `json:"gameId" gorm:"uniqueIndex:idx_socks_game"`
+	Status       string `json:"status" gorm:"default:active;index"`
+	BannedAt     int64  `json:"bannedAt"`
+	LastUsedAt   int64  `json:"lastUsedAt"`
+	UseCount     int    `json:"useCount" gorm:"default:0"`
+	Note         string `json:"note"`
+}
+
+type SocksRotationLog struct {
+	Id          int    `json:"id" gorm:"primaryKey;autoIncrement"`
+	InboundId   int    `json:"inboundId" gorm:"index"`
+	GameId      int    `json:"gameId" gorm:"index"`
+	FromSocksId int    `json:"fromSocksId"`
+	ToSocksId   int    `json:"toSocksId"`
+	Reason      string `json:"reason"`
+	CreatedAt   int64  `json:"createdAt" gorm:"index"`
 }
 
 type SocksProxy struct {

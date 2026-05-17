@@ -12,8 +12,9 @@ import (
 )
 
 type InboundController struct {
-	inboundService service.InboundService
-	xrayService    service.XrayService
+	inboundService      service.InboundService
+	socksRotationService service.SocksRotationService
+	xrayService         service.XrayService
 }
 
 func NewInboundController(g *gin.RouterGroup) *InboundController {
@@ -32,6 +33,7 @@ func (a *InboundController) initRouter(g *gin.RouterGroup) {
 	g.POST("/update/:id", a.updateInbound)
 	g.POST("/resetAllTraffic", a.resetAllTraffic)
 	g.POST("/updateSocks/:id", a.updateSocks)
+	g.POST("/rotate/:id", a.rotate)
 }
 
 func (a *InboundController) startTask() {
@@ -106,6 +108,29 @@ func (a *InboundController) updateSocks(c *gin.Context) {
 	if err == nil {
 		a.xrayService.SetToNeedRestart()
 	}
+}
+
+func (a *InboundController) rotate(c *gin.Context) {
+	id, err := strconv.Atoi(c.Param("id"))
+	if err != nil {
+		jsonMsg(c, "轮换 IP", err)
+		return
+	}
+	req := struct {
+		OutgoingMark string `form:"outgoingMark" json:"outgoingMark"`
+		Reason       string `form:"reason" json:"reason"`
+	}{}
+	if err := c.ShouldBind(&req); err != nil {
+		jsonMsg(c, "轮换 IP", err)
+		return
+	}
+	result, err := a.socksRotationService.RotateInbound(id, req.OutgoingMark, req.Reason)
+	if err != nil {
+		jsonMsg(c, "轮换 IP", err)
+		return
+	}
+	a.xrayService.SetToNeedRestart()
+	jsonObj(c, result, nil)
 }
 
 func (a *InboundController) resetAllTraffic(c *gin.Context) {

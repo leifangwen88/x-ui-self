@@ -59,13 +59,26 @@
             inModal: inModal,
             Protocols: protocols,
             SSMethods: SSMethods,
-            socksProxies: [],
+            allSocksProxies: [],
+            allInbounds: [],
+            datePickerLocale: typeof datePickerLocale !== 'undefined' ? datePickerLocale : {},
+            games: [],
             get inbound() {
                 return inModal.inbound;
             },
             get dbInbound() {
                 return inModal.dbInbound;
-            }
+            },
+        },
+        computed: {
+            selectableSocksProxies() {
+                return SocksUtil.filterSelectable(
+                    this.allSocksProxies,
+                    this.allInbounds,
+                    this.dbInbound.id,
+                    this.dbInbound.socksProxyId
+                );
+            },
         },
         methods: {
             streamNetworkChange(oldValue) {
@@ -73,10 +86,23 @@
                     this.inModal.inbound.tls = false;
                 }
             },
+            socksOptionLabel(s) {
+                return SocksUtil.formatOptionLabel(s);
+            },
             async loadSocksProxies() {
-                const msg = await HttpUtil.post('/xui/socks/list');
-                if (msg.success) {
-                    this.socksProxies = msg.obj || [];
+                const [socksMsg, inboundMsg, gameMsg] = await Promise.all([
+                    HttpUtil.post('/xui/socks/list'),
+                    HttpUtil.post('/xui/inbound/list'),
+                    HttpUtil.post('/xui/game/list'),
+                ]);
+                if (socksMsg.success) {
+                    this.allSocksProxies = socksMsg.obj || [];
+                }
+                if (inboundMsg.success) {
+                    this.allInbounds = inboundMsg.obj || [];
+                }
+                if (gameMsg.success) {
+                    this.games = gameMsg.obj || [];
                 }
             },
         },
