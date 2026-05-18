@@ -453,7 +453,9 @@
             async saveSyncConfig() {
                 this.syncSaving = true;
                 try {
-                    const msg = await HttpUtil.post('/xui/sync/saveConfig', this.syncConfig);
+                    const payload = Object.assign({}, this.syncConfig);
+                    delete payload.peerStatus;
+                    const msg = await HttpUtil.post('/xui/sync/saveConfig', payload);
                     if (msg.success) {
                         this.$message.success('同步配置已保存');
                         await this.loadSyncConfig();

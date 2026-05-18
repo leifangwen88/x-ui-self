@@ -24,20 +24,20 @@ const (
 )
 
 type SyncPeerConfig struct {
-	Name     string `json:"name"`
-	BaseURL  string `json:"baseUrl"`
-	Secret   string `json:"secret"`
-	Fallback bool   `json:"fallback"` // 兜底节点：高价稳定，仅当首选不可用时使用
+	Name     string `json:"name" form:"name"`
+	BaseURL  string `json:"baseUrl" form:"baseUrl"`
+	Secret   string `json:"secret" form:"secret"`
+	Fallback bool   `json:"fallback" form:"fallback"` // 兜底节点：高价稳定，仅当首选不可用时使用
 }
 
 type PanelSyncConfig struct {
-	Enabled       bool                   `json:"enabled"`
-	NodeId        string                 `json:"nodeId"`
-	Secret        string                 `json:"secret"`
-	PublicURL     string                 `json:"publicUrl"`
-	LocalFallback bool                   `json:"localFallback"` // 本机在站群订阅中作为兜底节点
-	Peers         []SyncPeerConfig       `json:"peers"`
-	PeerStatus []PanelPeerAlignStatus `json:"peerStatus,omitempty"`
+	Enabled       bool                   `json:"enabled" form:"enabled"`
+	NodeId        string                 `json:"nodeId" form:"nodeId"`
+	Secret        string                 `json:"secret" form:"secret"`
+	PublicURL     string                 `json:"publicUrl" form:"publicUrl"`
+	LocalFallback bool                   `json:"localFallback" form:"localFallback"` // 本机在站群订阅中作为兜底节点
+	Peers         []SyncPeerConfig       `json:"peers" form:"peers"`
+	PeerStatus    []PanelPeerAlignStatus `json:"peerStatus,omitempty" form:"-"`
 }
 
 type SyncEventDTO struct {
@@ -128,6 +128,8 @@ func (s *PanelSyncService) GetConfig() (*PanelSyncConfig, error) {
 	cfg.Enabled = enabled
 	publicURL, _ := s.settingService.getString("panelSyncPublicURL")
 	cfg.PublicURL = strings.TrimSpace(publicURL)
+	localFallback, _ := s.settingService.getBool("panelSyncLocalFallback")
+	cfg.LocalFallback = localFallback
 	raw, _ := s.settingService.getString("panelSyncPeers")
 	if strings.TrimSpace(raw) != "" {
 		_ = json.Unmarshal([]byte(raw), &cfg.Peers)
@@ -153,6 +155,7 @@ func (s *PanelSyncService) SaveConfig(cfg *PanelSyncConfig) error {
 	_ = s.settingService.setString("panelSyncSecret", strings.TrimSpace(cfg.Secret))
 	_ = s.settingService.setString("panelSyncPublicURL", strings.TrimSpace(cfg.PublicURL))
 	_ = s.settingService.setBool("panelSyncEnabled", cfg.Enabled)
+	_ = s.settingService.setBool("panelSyncLocalFallback", cfg.LocalFallback)
 	raw, err := json.Marshal(cfg.Peers)
 	if err != nil {
 		return err

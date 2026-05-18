@@ -53,14 +53,14 @@ type PanelAlignCompareResult struct {
 }
 
 type PanelAlignApplyRequest struct {
-	PeerIndex            int    `json:"peerIndex"`
-	GamesSource          string `json:"gamesSource"`
-	SocksSource          string `json:"socksSource"`
-	InboundsSource       string `json:"inboundsSource"`
-	InboundRemarkSource  string `json:"inboundRemarkSource"`
-	MarksSource          string `json:"marksSource"`
-	XrayTemplateSource   string `json:"xrayTemplateSource"`
-	PushToPeer           bool   `json:"pushToPeer"`
+	PeerIndex           int    `json:"peerIndex" form:"peerIndex"`
+	GamesSource         string `json:"gamesSource" form:"gamesSource"`
+	SocksSource         string `json:"socksSource" form:"socksSource"`
+	InboundsSource      string `json:"inboundsSource" form:"inboundsSource"`
+	InboundRemarkSource string `json:"inboundRemarkSource" form:"inboundRemarkSource"`
+	MarksSource         string `json:"marksSource" form:"marksSource"`
+	XrayTemplateSource  string `json:"xrayTemplateSource" form:"xrayTemplateSource"`
+	PushToPeer          bool   `json:"pushToPeer" form:"pushToPeer"`
 }
 
 type PanelAlignRemoteApply struct {

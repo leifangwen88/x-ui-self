@@ -39,7 +39,8 @@ var defaultValueMap = map[string]string{
 	"panelSyncSecret":     "",
 	"panelSyncPublicURL":  "",
 	"panelSyncEnabled":    "false",
-	"panelSyncPeers":      "[]",
+	"panelSyncPeers":          "[]",
+	"panelSyncLocalFallback":  "false",
 }
 
 type SettingService struct {
