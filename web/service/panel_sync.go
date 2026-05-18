@@ -81,6 +81,13 @@ type PanelSyncService struct {
 
 var globalPanelSync *PanelSyncService
 
+func NewPanelSyncService(xray XrayService, setting SettingService) *PanelSyncService {
+	return &PanelSyncService{
+		xrayService:    xray,
+		settingService: setting,
+	}
+}
+
 func InitPanelSync(s *PanelSyncService) {
 	globalPanelSync = s
 }

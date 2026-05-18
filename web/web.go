@@ -208,11 +208,7 @@ func (s *Server) initRouter() (*gin.Engine, error) {
 	s.xui = controller.NewXUIController(g)
 	controller.NewPanelSyncPublicController(g)
 
-	panelSync := service.PanelSyncService{
-		XrayService:    s.xrayService,
-		SettingService: s.settingService,
-	}
-	service.InitPanelSync(&panelSync)
+	service.InitPanelSync(service.NewPanelSyncService(s.xrayService, s.settingService))
 
 	return engine, nil
 }
