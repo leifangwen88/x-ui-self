@@ -138,6 +138,23 @@ func EmitInboundUpsertById(id int) {
 	EmitInboundUpsert(ib)
 }
 
+// EmitInboundUpsertDirect 写入 outbox 并推送，不受 IsApplying 影响（用于 IP 轮换等需完整落库后再同步的场景）
+func EmitInboundUpsertDirectById(id int) {
+	if id <= 0 || globalPanelSync == nil {
+		return
+	}
+	inboundSvc := InboundService{}
+	ib, err := inboundSvc.GetInbound(id)
+	if err != nil {
+		return
+	}
+	item, err := BuildInboundBackup(ib)
+	if err != nil {
+		return
+	}
+	_ = globalPanelSync.Emit(SyncEventInboundUpsert, item)
+}
+
 func EmitInboundUpsert(ib *model.Inbound) {
 	if ib == nil {
 		return

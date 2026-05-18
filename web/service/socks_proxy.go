@@ -101,13 +101,50 @@ func (s *SocksProxyService) IsExpired(socks *model.SocksProxy) bool {
 	return socks.ExpiryTime < time.Now().UnixMilli()
 }
 
+// DeleteSocksByNaturalKey 按 address:port 删除（供多机同步应用 socks_delete 事件）
+func DeleteSocksByNaturalKey(key string, syncOut bool) error {
+	addr, port, ok := ParseSocksNaturalKey(key)
+	if !ok {
+		return nil
+	}
+	db := database.GetDB()
+	var proxies []*model.SocksProxy
+	if err := db.Where("address = ? AND port = ?", strings.TrimSpace(addr), port).Find(&proxies).Error; err != nil {
+		return err
+	}
+	if len(proxies) == 0 {
+		return nil
+	}
+	svc := SocksProxyService{}
+	return svc.deleteSocksProxies(proxies, syncOut)
+}
+
 func (s *SocksProxyService) DeleteByIds(ids []int) error {
 	if len(ids) == 0 {
 		return common.NewError("未选择要删除的 SOCKS")
 	}
 	db := database.GetDB()
 	var proxies []*model.SocksProxy
-	_ = db.Where("id IN ?", ids).Find(&proxies).Error
+	if err := db.Where("id IN ?", ids).Find(&proxies).Error; err != nil {
+		return err
+	}
+	return s.deleteSocksProxies(proxies, true)
+}
+
+func (s *SocksProxyService) deleteSocksProxies(proxies []*model.SocksProxy, syncOut bool) error {
+	if len(proxies) == 0 {
+		return common.NewError("未选择要删除的 SOCKS")
+	}
+	ids := make([]int, 0, len(proxies))
+	for _, p := range proxies {
+		if p != nil && p.Id > 0 {
+			ids = append(ids, p.Id)
+		}
+	}
+	if len(ids) == 0 {
+		return common.NewError("未选择要删除的 SOCKS")
+	}
+	db := database.GetDB()
 	tx := db.Begin()
 	if err := tx.Model(model.Inbound{}).Where("socks_proxy_id IN ?", ids).Update("socks_proxy_id", 0).Error; err != nil {
 		tx.Rollback()
@@ -121,7 +158,7 @@ func (s *SocksProxyService) DeleteByIds(ids []int) error {
 	if err := tx.Commit().Error; err != nil {
 		return err
 	}
-	if globalPanelSync != nil && !globalPanelSync.IsApplying() {
+	if syncOut && globalPanelSync != nil {
 		for _, p := range proxies {
 			if p != nil {
 				globalPanelSync.EmitSocksDelete(p.Address, p.Port)

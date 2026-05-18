@@ -444,12 +444,7 @@ func (s *PanelSyncService) applySocksDelete(raw json.RawMessage) error {
 	if err := json.Unmarshal(raw, &p); err != nil {
 		return err
 	}
-	id, _, _, ok := s.resolveSocks(p.SocksKey)
-	if !ok {
-		return nil
-	}
-	socksSvc := SocksProxyService{}
-	if err := socksSvc.DeleteByIds([]int{id}); err != nil {
+	if err := DeleteSocksByNaturalKey(strings.TrimSpace(p.SocksKey), false); err != nil {
 		return err
 	}
 	s.xrayService.SetToNeedRestart()
@@ -481,6 +476,7 @@ func (s *PanelSyncService) resolveSocks(key string) (id int, address string, por
 	if !ok {
 		return 0, "", 0, false
 	}
+	address = strings.TrimSpace(address)
 	db := database.GetDB()
 	sp := &model.SocksProxy{}
 	err := db.Where("address = ? AND port = ?", address, port).First(sp).Error
@@ -565,11 +561,11 @@ func (s *PanelSyncService) EmitGameMark(socksProxyId, gameId int, mark string, n
 	}
 	switch mark {
 	case model.SocksGameMarkUsed:
-		syncEmit(SyncEventMarkUsed, payload)
+		_ = s.Emit(SyncEventMarkUsed, payload)
 	case model.SocksGameMarkBanned:
-		syncEmit(SyncEventMarkBanned, payload)
+		_ = s.Emit(SyncEventMarkBanned, payload)
 	case "clear":
-		syncEmit(SyncEventMarkClear, payload)
+		_ = s.Emit(SyncEventMarkClear, payload)
 	}
 }
 
@@ -622,7 +618,11 @@ func (s *PanelSyncService) EmitInboundBindGame(inboundId int, gameId int) {
 }
 
 func (s *PanelSyncService) EmitSocksDelete(address string, port int) {
-	syncEmit(SyncEventSocksDelete, syncSocksDeletePayload{
+	if strings.TrimSpace(address) == "" || port <= 0 {
+		return
+	}
+	// 显式删除操作：直接写入 outbox 并推送，不受 IsApplying 影响
+	_ = s.Emit(SyncEventSocksDelete, syncSocksDeletePayload{
 		SocksKey: SocksNaturalKey(address, port),
 	})
 }

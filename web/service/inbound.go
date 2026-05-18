@@ -246,6 +246,10 @@ func (s *InboundService) UpdateGameId(id int, gameId int) error {
 }
 
 func (s *InboundService) UpdateSocksProxyId(id int, socksProxyId int) error {
+	return s.updateSocksProxyId(id, socksProxyId, true)
+}
+
+func (s *InboundService) updateSocksProxyId(id int, socksProxyId int, emitSync bool) error {
 	inbound, err := s.GetInbound(id)
 	if err != nil {
 		return err
@@ -276,7 +280,7 @@ func (s *InboundService) UpdateSocksProxyId(id int, socksProxyId int) error {
 		socksGame := SocksGameService{}
 		_ = socksGame.RecordUsage(socksProxyId, inbound.GameId)
 	}
-	if globalPanelSync != nil && !globalPanelSync.IsApplying() {
+	if emitSync && globalPanelSync != nil && !globalPanelSync.IsApplying() {
 		EmitInboundUpsertById(id)
 	}
 	return nil

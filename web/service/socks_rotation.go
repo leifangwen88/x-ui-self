@@ -147,13 +147,15 @@ func (s *SocksRotationService) RotateInbound(inboundId int, outgoingMark string,
 			reason = "used"
 		}
 	}
-	if err := s.inboundService.UpdateSocksProxyId(inboundId, pick.Id); err != nil {
+	if err := s.inboundService.updateSocksProxyId(inboundId, pick.Id, false); err != nil {
 		return nil, err
 	}
 	now := time.Now().UnixMilli()
 	db := database.GetDB()
 	_ = db.Model(model.Inbound{}).Where("id = ?", inboundId).Update("last_rotated_at", now).Error
 	_ = s.appendLog(inboundId, inbound.GameId, fromId, pick.Id, reason)
+	// 轮换：标记已通过 MarkUsed/MarkBanned 同步；此处同步新 SOCKS 绑定与 last_rotated_at
+	EmitInboundUpsertDirectById(inboundId)
 	return &RotateResult{
 		FromSocksId: fromId,
 		ToSocksId:   pick.Id,
