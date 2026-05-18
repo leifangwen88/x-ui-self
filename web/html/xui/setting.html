@@ -327,19 +327,27 @@
                 const selfUrl = this.normPeerUrl(this.syncConfig.publicUrl);
                 const selfId = (this.syncConfig.nodeId || '').trim();
                 const list = this.syncConfig.members || [];
-                return list.filter(m => {
+                const seen = new Set();
+                const out = [];
+                list.forEach(m => {
                     const url = this.normPeerUrl(m.publicUrl);
                     if (!url) {
-                        return false;
+                        return;
                     }
                     if (url === selfUrl) {
-                        return false;
+                        return;
                     }
                     if (selfId && (m.nodeId || '').trim() === selfId) {
-                        return false;
+                        return;
                     }
-                    return true;
+                    const key = url || ((m.nodeId || '').trim());
+                    if (seen.has(key)) {
+                        return;
+                    }
+                    seen.add(key);
+                    out.push(m);
                 });
+                return out;
             },
             alignTableRows() {
                 if (!this.alignCompare) {
@@ -576,7 +584,8 @@
                 if (!key || !this.syncConfig.peerStatus) {
                     return { alignedAt: 0 };
                 }
-                const st = this.syncConfig.peerStatus.find(p => this.normPeerUrl(p.baseUrl) === key);
+                const st = this.syncConfig.peerStatus.find(p =>
+                    this.normPeerUrl(p.baseUrl) === key || this.normPeerUrl(p.peerKey) === key);
                 return st || { alignedAt: 0 };
             },
             isPeerAligned(baseUrl) {

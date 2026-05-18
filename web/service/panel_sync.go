@@ -667,7 +667,7 @@ func (s *PanelSyncService) PullFromPeers(cfg *PanelSyncConfig) {
 }
 
 func (s *PanelSyncService) pullPeer(local *PanelSyncConfig, peer SyncPeerConfig) {
-	peerKey := strings.TrimSpace(peer.BaseURL)
+	peerKey := normalizePeerKey(peer.BaseURL)
 	if peerKey == "" {
 		return
 	}
@@ -694,8 +694,8 @@ func (s *PanelSyncService) pullPeer(local *PanelSyncConfig, peer SyncPeerConfig)
 		}
 	}
 	if maxTs > since {
-		row := model.SyncPeerCursor{PeerKey: peerKey, LastPull: maxTs}
-		_ = db.Save(&row).Error
+		cursor.LastPull = maxTs
+		_ = db.Save(cursor).Error
 	}
 }
 

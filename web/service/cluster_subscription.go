@@ -583,7 +583,8 @@ func genClusterClashYamlByGame(members map[string][]clusterMember, order []strin
 		return ""
 	}
 
-	var groupBlocks []string
+	var childGroupBlocks []string
+	var gameGroupBlocks []string
 	var rootGames []string
 	for _, gid := range gameOrder {
 		inbounds := byGame[gid]
@@ -597,13 +598,13 @@ func genClusterClashYamlByGame(members map[string][]clusterMember, order []strin
 			if root == "" {
 				continue
 			}
-			groupBlocks = append(groupBlocks, blocks...)
+			childGroupBlocks = append(childGroupBlocks, blocks...)
 			inboundRoots = append(inboundRoots, root)
 		}
 		if len(inboundRoots) == 0 {
 			continue
 		}
-		groupBlocks = append(groupBlocks, clashSelectGroupYaml(gn, inboundRoots))
+		gameGroupBlocks = append(gameGroupBlocks, clashSelectGroupYaml(gn, inboundRoots))
 		rootGames = append(rootGames, yamlQuote(gn))
 	}
 
@@ -612,12 +613,14 @@ func genClusterClashYamlByGame(members map[string][]clusterMember, order []strin
 	b.WriteString("proxies:\n")
 	b.WriteString(strings.Join(proxyBlocks, "\n"))
 	b.WriteString("\n\nproxy-groups:\n")
-	b.WriteString(strings.Join(groupBlocks, ""))
 	b.WriteString(fmt.Sprintf("  - name: %s\n    type: select\n    proxies:\n", yamlQuote(ClashGroupClusterLB)))
 	for _, g := range rootGames {
 		b.WriteString("      - " + g + "\n")
 	}
-	b.WriteString("      - DIRECT\n\nrules:\n  - MATCH,")
+	b.WriteString("      - DIRECT\n")
+	b.WriteString(strings.Join(gameGroupBlocks, ""))
+	b.WriteString(strings.Join(childGroupBlocks, ""))
+	b.WriteString("\nrules:\n  - MATCH,")
 	b.WriteString(ClashGroupClusterLB)
 	b.WriteString("\n")
 	return b.String()

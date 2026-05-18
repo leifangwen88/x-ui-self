@@ -65,10 +65,36 @@ func (s *PanelSyncService) saveClusterMembers(list []ClusterMember) error {
 }
 
 func memberKey(m ClusterMember) string {
-	if id := strings.TrimSpace(m.NodeId); id != "" {
-		return "id:" + id
+	if url := normalizePeerKey(m.PublicURL); url != "" {
+		return "url:" + url
 	}
-	return "url:" + normalizePeerKey(m.PublicURL)
+	return "id:" + strings.TrimSpace(m.NodeId)
+}
+
+func clusterMembersEquivalent(a, b ClusterMember) bool {
+	if au, bu := normalizePeerKey(a.PublicURL), normalizePeerKey(b.PublicURL); au != "" && bu != "" && au == bu {
+		return true
+	}
+	if ai, bi := strings.TrimSpace(a.NodeId), strings.TrimSpace(b.NodeId); ai != "" && bi != "" && ai == bi {
+		return true
+	}
+	return false
+}
+
+func mergeClusterMemberValue(prev, next ClusterMember) ClusterMember {
+	if next.UpdatedAt < prev.UpdatedAt {
+		return prev
+	}
+	if strings.TrimSpace(next.NodeId) == "" {
+		next.NodeId = strings.TrimSpace(prev.NodeId)
+	}
+	if normalizePeerKey(next.PublicURL) == "" {
+		next.PublicURL = normalizePeerKey(prev.PublicURL)
+	}
+	if strings.TrimSpace(next.Name) == "" {
+		next.Name = strings.TrimSpace(prev.Name)
+	}
+	return next
 }
 
 func mergeClusterMembers(base []ClusterMember, incoming []ClusterMember) []ClusterMember {
@@ -84,10 +110,23 @@ func mergeClusterMembers(base []ClusterMember, incoming []ClusterMember) []Clust
 			m.UpdatedAt = time.Now().UnixMilli()
 		}
 		k := memberKey(m)
-		if prev, ok := index[k]; ok {
-			if m.UpdatedAt >= prev.UpdatedAt {
-				index[k] = m
+		for _, existingKey := range order {
+			prev := index[existingKey]
+			if !clusterMembersEquivalent(prev, m) {
+				continue
 			}
+			merged := mergeClusterMemberValue(prev, m)
+			newKey := memberKey(merged)
+			if newKey != existingKey {
+				delete(index, existingKey)
+				for i, orderedKey := range order {
+					if orderedKey == existingKey {
+						order[i] = newKey
+						break
+					}
+				}
+			}
+			index[newKey] = merged
 			return
 		}
 		index[k] = m

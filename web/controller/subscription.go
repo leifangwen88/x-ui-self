@@ -53,7 +53,7 @@ func (a *SubscriptionController) serve(c *gin.Context) {
 			c.String(http.StatusNotFound, "No available nodes")
 			return
 		}
-		setXrayJsonHeaders(c, "v2ray.json")
+		setXrayJsonHeaders(c, subscriptionFilename("v2ray-json", gameId, "json"))
 		c.String(http.StatusOK, body)
 	case "v2ray":
 		body := a.subService.GenV2raySubscription(subHost, reqHost, gameId)
@@ -73,7 +73,7 @@ func (a *SubscriptionController) serve(c *gin.Context) {
 			c.String(http.StatusNotFound, "No available cluster nodes")
 			return
 		}
-		setXrayJsonHeaders(c, "cluster-v2ray.json")
+		setXrayJsonHeaders(c, subscriptionFilename("cluster-v2ray-json", gameId, "json"))
 		c.String(http.StatusOK, body)
 	case "cluster-v2ray":
 		if !a.subService.ClusterSubEnabled() {
@@ -98,7 +98,7 @@ func (a *SubscriptionController) serve(c *gin.Context) {
 			return
 		}
 		c.Header("Content-Type", "text/plain; charset=utf-8")
-		c.Header("Content-Disposition", "attachment; filename=cluster-shadowrocket.conf")
+		c.Header("Content-Disposition", "attachment; filename="+subscriptionFilename("cluster-shadowrocket", gameId, "conf"))
 		c.String(http.StatusOK, body)
 	case "cluster-clash":
 		if !a.subService.ClusterSubEnabled() {
@@ -111,7 +111,7 @@ func (a *SubscriptionController) serve(c *gin.Context) {
 			return
 		}
 		c.Header("Content-Type", "application/yaml; charset=utf-8")
-		c.Header("Content-Disposition", "attachment; filename=cluster-clash.yaml")
+		c.Header("Content-Disposition", "attachment; filename="+subscriptionFilename("cluster-clash", gameId, "yaml"))
 		c.String(http.StatusOK, body)
 	case "cluster":
 		if !a.subService.ClusterSubEnabled() {
@@ -142,7 +142,7 @@ func (a *SubscriptionController) serve(c *gin.Context) {
 			return
 		}
 		c.Header("Content-Type", "application/yaml; charset=utf-8")
-		c.Header("Content-Disposition", "attachment; filename=clash.yaml")
+		c.Header("Content-Disposition", "attachment; filename="+subscriptionFilename("clash", gameId, "yaml"))
 		c.String(http.StatusOK, body)
 	case "links":
 		body := a.subService.GenLinksText(subHost, reqHost, gameId)
@@ -175,6 +175,13 @@ func setXrayJsonHeaders(c *gin.Context, filename string) {
 		c.Header("Content-Disposition", "attachment; filename="+filename)
 	}
 	c.Header("Profile-Update-Interval", "24")
+}
+
+func subscriptionFilename(kind string, gameId int, ext string) string {
+	if gameId >= 0 {
+		return "x-ui-game-" + strconv.Itoa(gameId) + "-" + kind + "." + ext
+	}
+	return "x-ui-" + kind + "." + ext
 }
 
 func hostOnlyFromRequest(c *gin.Context) string {

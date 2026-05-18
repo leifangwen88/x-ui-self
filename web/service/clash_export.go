@@ -49,8 +49,8 @@ func GenClashYamlByGame(inbounds []*model.Inbound, subHost string, requestHost s
 		return ""
 	}
 	var proxyBlocks []string
-	var allNames []string
 	groupBlocks := make([]string, 0)
+	firstGroup := ""
 	for _, gid := range order {
 		list := byGame[gid]
 		gn := gameName[gid]
@@ -68,7 +68,6 @@ func GenClashYamlByGame(inbounds []*model.Inbound, subHost string, requestHost s
 				continue
 			}
 			names = append(names, name)
-			allNames = append(allNames, name)
 			block := "  -"
 			for _, line := range lines {
 				block += "\n    " + line
@@ -76,6 +75,9 @@ func GenClashYamlByGame(inbounds []*model.Inbound, subHost string, requestHost s
 			proxyBlocks = append(proxyBlocks, block)
 		}
 		if len(names) > 0 {
+			if firstGroup == "" {
+				firstGroup = gn
+			}
 			groupBlocks = append(groupBlocks, fmt.Sprintf("  - name: %s\n    type: select\n    proxies:", yamlQuote(gn)))
 			for _, n := range names {
 				groupBlocks = append(groupBlocks, "      - "+yamlQuote(n))
@@ -83,7 +85,7 @@ func GenClashYamlByGame(inbounds []*model.Inbound, subHost string, requestHost s
 			groupBlocks = append(groupBlocks, "      - DIRECT")
 		}
 	}
-	if len(allNames) == 0 {
+	if len(proxyBlocks) == 0 || firstGroup == "" {
 		return ""
 	}
 	var b strings.Builder
@@ -92,22 +94,8 @@ func GenClashYamlByGame(inbounds []*model.Inbound, subHost string, requestHost s
 	b.WriteString(strings.Join(proxyBlocks, "\n"))
 	b.WriteString("\n\nproxy-groups:\n")
 	b.WriteString(strings.Join(groupBlocks, "\n"))
-	b.WriteString(fmt.Sprintf("\n  - name: %s\n    type: select\n    proxies:\n", yamlQuote(ClashGroupSingleSite)))
-	for _, gid := range order {
-		gn := gameName[gid]
-		if gn == "" && gid == 0 {
-			gn = "未指定游戏"
-		} else if gn == "" {
-			gn = fmt.Sprintf("游戏#%d", gid)
-		}
-		if len(byGame[gid]) > 0 {
-			b.WriteString("      - ")
-			b.WriteString(yamlQuote(gn))
-			b.WriteString("\n")
-		}
-	}
-	b.WriteString("      - DIRECT\n\nrules:\n  - MATCH,")
-	b.WriteString(ClashGroupSingleSite)
+	b.WriteString("\n\nrules:\n  - MATCH,")
+	b.WriteString(firstGroup)
 	b.WriteString("\n")
 	return b.String()
 }
@@ -163,7 +151,7 @@ func GenClashYaml(inbounds []*model.Inbound, subHost string, requestHost string)
 	b.WriteString("proxies:\n")
 	b.WriteString(strings.Join(proxyBlocks, "\n"))
 	b.WriteString("\n\nproxy-groups:\n")
-	b.WriteString(fmt.Sprintf("  - name: %s\n", yamlQuote(ClashGroupSingleSite)))
+	b.WriteString("  - name: 节点选择\n")
 	b.WriteString("    type: select\n")
 	b.WriteString("    proxies:\n")
 	for _, n := range names {
@@ -173,7 +161,7 @@ func GenClashYaml(inbounds []*model.Inbound, subHost string, requestHost string)
 	}
 	b.WriteString("      - DIRECT\n\nrules:\n")
 	b.WriteString("  - MATCH,")
-	b.WriteString(ClashGroupSingleSite)
+	b.WriteString("节点选择")
 	b.WriteString("\n")
 	return b.String()
 }

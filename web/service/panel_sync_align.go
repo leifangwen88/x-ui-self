@@ -42,7 +42,7 @@ func (s *PanelSyncService) ListPeerAlignStatus(cfg *PanelSyncConfig) []PanelPeer
 	db := database.GetDB()
 	list := make([]PanelPeerAlignStatus, 0, len(cfg.Peers))
 	for _, p := range cfg.Peers {
-		key := strings.TrimSpace(p.BaseURL)
+		key := normalizePeerKey(p.BaseURL)
 		if key == "" {
 			continue
 		}
@@ -68,7 +68,7 @@ func (s *PanelSyncService) CompareWithPeer(peerIndex int, peerBaseURL string) (*
 		return nil, err
 	}
 	peer := cfg.Peers[idx]
-	peerKey := strings.TrimSpace(peer.BaseURL)
+	peerKey := normalizePeerKey(peer.BaseURL)
 	if peerKey == "" {
 		return nil, common.NewError("对等节点地址为空")
 	}
@@ -103,6 +103,11 @@ func (s *PanelSyncService) CompareWithPeer(peerIndex int, peerBaseURL string) (*
 	res.PeerReachable = true
 	res.Peer = snapshotCounts(remote)
 	res.Diff = compareSnapshots(local, remote)
+	if alignDiffEmpty(res.Diff) {
+		alignedAt := time.Now().UnixMilli()
+		s.markPeerAligned(peerKey, alignedAt)
+		res.AlignedAt = alignedAt
+	}
 	return res, nil
 }
 
@@ -119,7 +124,7 @@ func (s *PanelSyncService) ApplyClusterAlign(userId int, req *PanelAlignApplyReq
 		return nil, err
 	}
 	peer := cfg.Peers[idx]
-	peerKey := strings.TrimSpace(peer.BaseURL)
+	peerKey := normalizePeerKey(peer.BaseURL)
 	if peerKey == "" {
 		return nil, common.NewError("对等节点地址为空")
 	}
@@ -242,6 +247,23 @@ func (s *PanelSyncService) markPeerAligned(peerKey string, alignedAt int64) {
 		cur.LastPull = alignedAt
 	}
 	_ = db.Save(&cur).Error
+}
+
+func alignDiffEmpty(diff PanelAlignDiff) bool {
+	categories := []PanelAlignCategoryDiff{
+		diff.Games,
+		diff.Socks,
+		diff.Inbounds,
+		diff.InboundRemarks,
+		diff.Marks,
+		diff.XrayTemplate,
+	}
+	for _, d := range categories {
+		if d.LocalOnly != 0 || d.PeerOnly != 0 || d.Conflict != 0 {
+			return false
+		}
+	}
+	return true
 }
 
 func validateAlignSource(src string) error {
