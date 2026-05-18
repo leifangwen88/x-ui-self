@@ -2,6 +2,8 @@
 
 基于 [x-ui](https://github.com/vaxilu/x-ui) 的自用二开版本，仓库：[leifangwen88/x-ui-self](https://github.com/leifangwen88/x-ui-self)。
 
+本二开版本更针对于中转做优化，支持多IP分组管理，多中转站间协同同步，支持营销类IP系统化管理
+
 支持多协议多用户的 xray 面板。
 # 功能介绍
 
@@ -30,7 +32,7 @@ bash <(curl -Ls https://raw.githubusercontent.com/leifangwen88/x-ui-self/main/in
 指定版本安装或升级（将 `v0.x.x` 换为 [Releases](https://github.com/leifangwen88/x-ui-self/releases) 中的标签）：
 
 ```bash
-bash <(curl -Ls https://raw.githubusercontent.com/leifangwen88/x-ui-self/main/install.sh) v0.x.x
+bash <(curl -Ls https://raw.githubusercontent.com/leifangwen88/x-ui-self/main/install.sh) 0.3.4
 ```
 
 安装完成后，也可在服务器上使用管理命令 `x-ui`（如 `x-ui update` 更新面板）。
@@ -160,9 +162,6 @@ TG通知内容：
 x-ui v2-ui
 ```
 
-## issue 关闭
-
-各种小白问题看得血压很高
 
 ## Stargazers over time
 
