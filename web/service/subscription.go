@@ -19,6 +19,8 @@ type SubGameGroup struct {
 	GameName      string `json:"gameName"`
 	InboundCount  int    `json:"inboundCount"`
 	Base64Path    string `json:"base64Path"`
+	V2rayPath     string `json:"v2rayPath"`
+	V2rayJsonPath string `json:"v2rayJsonPath"`
 	LinksPath     string `json:"linksPath"`
 	ClashPath     string `json:"clashPath"`
 }
@@ -27,6 +29,8 @@ type SubInfo struct {
 	Token               string          `json:"token"`
 	SubHost             string          `json:"subHost"`
 	Base64Path          string          `json:"base64Path"`
+	V2rayPath           string          `json:"v2rayPath"`
+	V2rayJsonPath       string          `json:"v2rayJsonPath"`
 	LinksPath           string          `json:"linksPath"`
 	ClashPath           string          `json:"clashPath"`
 	TotalInboundCount   int             `json:"totalInboundCount"`
@@ -53,6 +57,8 @@ func (s *SubscriptionService) GetInfo() (*SubInfo, error) {
 		Token:             token,
 		SubHost:           subHost,
 		Base64Path:        "sub/" + token,
+		V2rayPath:         "sub/" + token + "?type=v2ray",
+		V2rayJsonPath:     "sub/" + token + "?type=v2ray-json",
 		LinksPath:         "sub/" + token + "?type=links",
 		ClashPath:         "sub/" + token + "?type=clash",
 		TotalInboundCount: total,
@@ -97,7 +103,9 @@ func (s *SubscriptionService) buildSubGroups(token string) ([]SubGameGroup, int,
 			GameName:     g.Name,
 			InboundCount: n,
 			Base64Path:   prefix,
-			LinksPath:    prefix + "&type=links",
+			V2rayPath:     prefix + "&type=v2ray",
+			V2rayJsonPath: prefix + "&type=v2ray-json",
+			LinksPath:     prefix + "&type=links",
 			ClashPath:    prefix + "&type=clash",
 		})
 	}
@@ -177,4 +185,12 @@ func (s *SubscriptionService) GenClashSubscription(subHost string, requestHost s
 		return ""
 	}
 	return GenClashYamlByGame(inbounds, subHost, requestHost)
+}
+
+func (s *SubscriptionService) GenXrayJsonSubscription(subHost string, requestHost string, gameId int) string {
+	inbounds, err := s.filterInbounds(gameId)
+	if err != nil {
+		return ""
+	}
+	return GenXrayJsonByGame(inbounds, subHost, requestHost)
 }

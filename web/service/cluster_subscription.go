@@ -36,6 +36,8 @@ type ClusterSubMeta struct {
 	AlignedCount int    `json:"alignedCount"`
 	ClashPath        string `json:"clashPath"`
 	ShadowrocketPath string `json:"shadowrocketPath"`
+	V2rayPath        string `json:"v2rayPath"`
+	V2rayJsonPath    string `json:"v2rayJsonPath"`
 	Base64Path       string `json:"base64Path"`
 	LinksPath        string `json:"linksPath"`
 	Hint         string `json:"hint,omitempty"`
@@ -151,6 +153,84 @@ func clusterGameOrder(byGame map[int][]clusterSlot, games []*model.Game) []int {
 	return order
 }
 
+func isClusterMetaPeerLabel(label string) bool {
+	switch strings.TrimSpace(label) {
+	case "本机", "种子节点", "对端节点", "peer":
+		return true
+	default:
+		return false
+	}
+}
+
+func clusterSubscriptionNodeLabel(peer SyncPeerConfig, connectHost string) string {
+	label := strings.TrimSpace(peer.Name)
+	if label != "" && !isClusterMetaPeerLabel(label) {
+		return label
+	}
+	if id := strings.TrimSpace(peer.BaseURL); id != "" {
+		if h := peerConnectHost(peer); h != "" {
+			return h
+		}
+	}
+	if connectHost != "" {
+		return connectHost
+	}
+	return "node"
+}
+
+func clusterPeersForSubscription(cfg *PanelSyncConfig) []SyncPeerConfig {
+	if cfg == nil {
+		return nil
+	}
+	selfURL := normalizePeerKey(cfg.PublicURL)
+	seen := make(map[string]bool)
+	out := make([]SyncPeerConfig, 0, len(cfg.Peers))
+	for _, p := range cfg.Peers {
+		url := normalizePeerKey(p.BaseURL)
+		if url == "" || url == selfURL || seen[url] {
+			continue
+		}
+		seen[url] = true
+		peer := p
+		peer.BaseURL = url
+		peer.Name = clusterSubscriptionNodeLabel(peer, peerConnectHost(peer))
+		out = append(out, peer)
+	}
+	return out
+}
+
+func dedupeClusterMembersByHost(list []clusterMember) []clusterMember {
+	byHost := make(map[string]clusterMember)
+	rank := func(m clusterMember) int {
+		if isClusterMetaPeerLabel(m.NodeLabel) {
+			return 0
+		}
+		if strings.TrimSpace(m.NodeLabel) == "" {
+			return 1
+		}
+		return 2
+	}
+	for _, m := range list {
+		host := strings.TrimSpace(m.ConnectHost)
+		if host == "" {
+			continue
+		}
+		prev, ok := byHost[host]
+		if !ok || rank(m) > rank(prev) {
+			byHost[host] = m
+		}
+	}
+	out := make([]clusterMember, 0, len(byHost))
+	for _, m := range byHost {
+		label := strings.TrimSpace(m.NodeLabel)
+		if isClusterMetaPeerLabel(label) {
+			m.NodeLabel = hostOnly(m.ConnectHost)
+		}
+		out = append(out, m)
+	}
+	return out
+}
+
 func inboundMatchesGameFilter(ib *model.Inbound, gameId int) bool {
 	if ib == nil || !ib.Enable || !InboundSupportsLink(ib.Protocol) {
 		return false
@@ -190,14 +270,26 @@ func (s *SubscriptionService) GetClusterSubMeta() (*ClusterSubMeta, error) {
 	if meta.AlignedCount == 0 {
 		meta.Hint = "建议先完成首次对齐向导后再使用站群订阅"
 	} else {
-		meta.Hint = "站群按入站备注聚合（同备注跨机合并为入口1等）；同步/导入按端口对齐，请保证各机同端口备注一致"
+		meta.Hint = "站群按入站备注聚合；V2Box 推荐「V2Ray JSON 站群」；小火箭 / Clash 站群含策略组。节点数=真实服务器台数，勿把本机/种子当独立节点"
 	}
 	prefix := "sub/" + token
 	meta.ShadowrocketPath = prefix + "?type=cluster-shadowrocket"
 	meta.ClashPath = prefix + "?type=cluster-clash"
+	meta.V2rayPath = prefix + "?type=cluster-v2ray"
+	meta.V2rayJsonPath = prefix + "?type=cluster-v2ray-json"
 	meta.Base64Path = prefix + "?type=cluster"
 	meta.LinksPath = prefix + "?type=cluster&format=links"
 	return meta, nil
+}
+
+func clusterSubDisplayLabel(label, connectHost string) string {
+	label = strings.TrimSpace(label)
+	if isClusterMetaPeerLabel(label) || label == "" {
+		if h := strings.TrimSpace(connectHost); h != "" {
+			return h
+		}
+	}
+	return label
 }
 
 func (s *SubscriptionService) collectClusterMembers(subHost string, localRequestHost string, gameId int) (map[string][]clusterMember, []string, error) {
@@ -215,19 +307,22 @@ func (s *SubscriptionService) collectClusterMembers(subHost string, localRequest
 
 	localLabel := "本机"
 	localFallback := false
+	localHost := hostOnly(localRequestHost)
 	if globalPanelSync != nil {
 		if cfg, err := globalPanelSync.GetConfig(); err == nil {
 			if strings.TrimSpace(cfg.NodeId) != "" {
 				localLabel = strings.TrimSpace(cfg.NodeId)
 			}
 			localFallback = cfg.LocalFallback
+			if h := peerConnectHost(SyncPeerConfig{BaseURL: cfg.PublicURL}); h != "" {
+				localHost = h
+			}
 		}
 	}
 	localInbounds, err := s.filterInbounds(gameId)
 	if err != nil {
 		return nil, nil, err
 	}
-	localHost := hostOnly(localRequestHost)
 	for _, ib := range localInbounds {
 		key := clusterInboundKey(ib.Remark, ib.Port)
 		addMember(key, clusterMember{
@@ -246,14 +341,8 @@ func (s *SubscriptionService) collectClusterMembers(subHost string, localRequest
 	games, _ := s.gameService.GetAll()
 	gameCodeToId := buildGameCodeToId(games)
 	secret := strings.TrimSpace(cfg.Secret)
-	for _, peer := range cfg.Peers {
-		label := strings.TrimSpace(peer.Name)
-		if label == "" {
-			label = peerConnectHost(peer)
-		}
-		if label == "" {
-			label = "peer"
-		}
+	for _, peer := range clusterPeersForSubscription(cfg) {
+		label := clusterSubscriptionNodeLabel(peer, peerConnectHost(peer))
 		snap, err := fetchPeerSnapshot(peer, secret)
 		if err != nil || snap == nil {
 			continue
@@ -295,6 +384,9 @@ func (s *SubscriptionService) collectClusterMembers(subHost string, localRequest
 				GameId: memberGameId, Fallback: peer.Fallback,
 			})
 		}
+	}
+	for k := range members {
+		members[k] = dedupeClusterMembersByHost(members[k])
 	}
 	return members, order, nil
 }
@@ -341,7 +433,7 @@ func buildClusterInboundGroups(members map[string][]clusterMember, order []strin
 	}
 
 	for _, key := range order {
-		list := members[key]
+		list := dedupeClusterMembersByHost(members[key])
 		if len(list) == 0 {
 			continue
 		}
@@ -355,7 +447,7 @@ func buildClusterInboundGroups(members map[string][]clusterMember, order []strin
 		for _, m := range list {
 			pname := displayName
 			if len(list) > 1 {
-				pname = fmt.Sprintf("%s @ %s", displayName, m.NodeLabel)
+				pname = fmt.Sprintf("%s @ %s", displayName, clusterSubDisplayLabel(m.NodeLabel, m.ConnectHost))
 			}
 			lines, pname, ok := inboundToClashLinesWithName(m.Inbound, "", m.ConnectHost, pname)
 			if !ok {
@@ -444,6 +536,15 @@ func (s *SubscriptionService) ClusterSubEnabled() bool {
 	return err == nil && meta != nil && meta.Enabled
 }
 
+func (s *SubscriptionService) GenClusterXrayJsonSubscription(subHost string, requestHost string, gameId int) string {
+	members, order, err := s.collectClusterMembers(subHost, requestHost, gameId)
+	if err != nil || len(order) == 0 {
+		return ""
+	}
+	games, _ := s.gameService.GetAll()
+	return genClusterXrayJsonByGame(members, order, games)
+}
+
 func (s *SubscriptionService) GenClusterClashSubscription(subHost string, requestHost string, gameId int) string {
 	members, order, err := s.collectClusterMembers(subHost, requestHost, gameId)
 	if err != nil || len(order) == 0 {
@@ -507,7 +608,7 @@ func genClusterClashYamlByGame(members map[string][]clusterMember, order []strin
 	}
 
 	var b strings.Builder
-	b.WriteString("# Clash / Mihomo 站群订阅（按游戏→入站备注，入站内 load-balance，兜底机 fallback）\n")
+	writeClashYamlHeader(&b, "# Clash / Mihomo 站群订阅（按游戏→入站备注，入站内 load-balance，兜底机 fallback）")
 	b.WriteString("proxies:\n")
 	b.WriteString(strings.Join(proxyBlocks, "\n"))
 	b.WriteString("\n\nproxy-groups:\n")

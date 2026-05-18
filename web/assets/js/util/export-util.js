@@ -1,5 +1,5 @@
 /**
- * 入站批量导出：分享链接、订阅 Base64、Clash YAML
+ * 入站批量导出：分享链接、V2Ray / 通用订阅 Base64、Clash YAML
  */
 class ExportUtil {
 
@@ -24,6 +24,23 @@ class ExportUtil {
 
     static genShareLinks(dbInbounds) {
         return this.collect(dbInbounds).map(ib => ib.genLink());
+    }
+
+    /** v2rayNG / v2rayN / Nekoray 等：仅 vmess/vless/trojan/ss 链接的 Base64 订阅 */
+    static genV2raySubscriptionBase64(dbInbounds) {
+        const links = this.filterV2rayShareLinks(this.genShareLinks(dbInbounds));
+        if (links.length === 0) {
+            return '';
+        }
+        return base64(links.join('\n'));
+    }
+
+    static filterV2rayShareLinks(links) {
+        return (links || []).filter(l => {
+            const s = String(l || '').trim().toLowerCase();
+            return s.startsWith('vmess://') || s.startsWith('vless://')
+                || s.startsWith('trojan://') || s.startsWith('ss://');
+        });
     }
 
     /** 小火箭 / Surge / QX 等常用的 Base64 订阅正文 */
@@ -225,7 +242,8 @@ class ExportUtil {
             return { yaml: '', skipped: skipped, count: 0 };
         }
 
-        let yaml = '# Clash / Mihomo 配置（由 x-ui 批量导出）\n';
+        let yaml = '# Clash / Mihomo 配置（由 x-ui 批量导出）\n'
+            + '# 苹果客户端 V2Box、Karing 等可直接使用本订阅\n';
         yaml += 'proxies:\n';
         yaml += proxyYaml.join('\n') + '\n';
         yaml += '\nproxy-groups:\n';
@@ -245,8 +263,42 @@ class ExportUtil {
     static subscriptionHint(basePath) {
         const base = (basePath || '/').replace(/\/?$/, '/');
         return '【订阅说明】\n'
-            + '1. 推荐使用入站列表页顶部的「订阅地址」自动 URL（小火箭 / Clash 等）。\n'
-            + '2. 下方为离线 Base64 正文，也可保存为 .txt 放到 HTTPS 静态地址后当订阅用。\n'
-            + '3. 面板路径前缀：' + base + '\n';
+            + '1. 推荐使用入站列表页顶部的「订阅地址」自动 URL。\n'
+            + '2. v2rayNG / v2rayN 请用「V2Ray 订阅」URL；小火箭 / Surge 可用「通用订阅」。\n'
+            + '3. 下方为离线 Base64 正文，也可保存为 .txt 放到 HTTPS 静态地址后当订阅用。\n'
+            + '4. 面板路径前缀：' + base + '\n';
+    }
+
+    static v2rayJsonHint(singleUrl, clusterUrl, basePath) {
+        const base = (basePath || '/').replace(/\/?$/, '/');
+        let hint = '【V2Ray JSON 说明 · V2Box】\n'
+            + '1. 在 V2Box 中选择从 URL / 剪贴板导入配置（非「订阅链接」）。\n'
+            + '2. 粘贴下方单站或站群 JSON 订阅 URL，客户端会拉取完整 JSON（含 balancer 与游戏分组）。\n'
+            + '3. 默认路由走「单站」或「站群负载均衡」；可在出站/负载均衡列表切换游戏或入口组。\n';
+        if (singleUrl) {
+            hint += '\n单站 JSON URL：\n' + singleUrl + '\n';
+        }
+        if (clusterUrl) {
+            hint += '\n站群 JSON URL：\n' + clusterUrl + '\n';
+        }
+        if (!singleUrl) {
+            hint += '\n请先在入站页展开「订阅地址」复制 V2Ray JSON URL。\n';
+        }
+        hint += '\n面板路径前缀：' + base + '\n';
+        return hint;
+    }
+
+    static v2raySubscriptionHint(subUrl, basePath) {
+        const base = (basePath || '/').replace(/\/?$/, '/');
+        let hint = '【V2Ray 订阅说明】\n'
+            + '1. v2rayNG / v2rayN / Nekoray：在客户端添加「订阅」，粘贴下方 URL 或 Base64 正文。\n';
+        if (subUrl) {
+            hint += '2. 推荐订阅 URL：\n' + subUrl + '\n';
+            hint += '3. 面板路径前缀：' + base + '\n';
+        } else {
+            hint += '2. 请先在入站页展开「订阅地址」复制「V2Ray 订阅」URL。\n'
+                + '3. 面板路径前缀：' + base + '\n';
+        }
+        return hint;
     }
 }

@@ -177,7 +177,7 @@ func buildSRShadowsocks(name, server, port string, ib *model.Inbound) (string, b
 }
 
 func srHealthSuffix() string {
-	return "url=http://www.gstatic.com/generate_204,interval=300,timeout=5,tolerance=50"
+	return "url=http://www.gstatic.com/generate_204,interval=60,timeout=5,tolerance=50"
 }
 
 func buildClusterSRInboundGroups(groupName string, primary, fallback []string) []string {
@@ -219,7 +219,7 @@ func genClusterShadowrocketConf(members map[string][]clusterMember, order []stri
 	proxyLines := make([]string, 0)
 	nameSet := make(map[string]bool)
 	for _, key := range order {
-		list := members[key]
+		list := dedupeClusterMembersByHost(members[key])
 		if len(list) == 0 {
 			continue
 		}
@@ -227,7 +227,7 @@ func genClusterShadowrocketConf(members map[string][]clusterMember, order []stri
 		for _, m := range list {
 			pname := displayName
 			if len(list) > 1 {
-				pname = fmt.Sprintf("%s @ %s", displayName, m.NodeLabel)
+				pname = fmt.Sprintf("%s @ %s", displayName, clusterSubDisplayLabel(m.NodeLabel, m.ConnectHost))
 			}
 			pname = srSanitizeName(pname)
 			if nameSet[pname] {

@@ -15,6 +15,17 @@ const (
 	ClashGroupClusterLB  = "站群负载均衡"
 )
 
+// clashIOSClientHint 写入各 Clash 订阅 YAML 顶部说明
+const clashIOSClientHint = "# 苹果客户端 V2Box、Karing 等可直接使用本订阅\n"
+
+func writeClashYamlHeader(b *strings.Builder, titleLine string) {
+	b.WriteString(titleLine)
+	if !strings.HasSuffix(titleLine, "\n") {
+		b.WriteString("\n")
+	}
+	b.WriteString(clashIOSClientHint)
+}
+
 func GenClashYamlByGame(inbounds []*model.Inbound, subHost string, requestHost string) string {
 	gameName := make(map[int]string)
 	gameService := GameService{}
@@ -76,7 +87,7 @@ func GenClashYamlByGame(inbounds []*model.Inbound, subHost string, requestHost s
 		return ""
 	}
 	var b strings.Builder
-	b.WriteString("# Clash / Mihomo 单站订阅（按游戏分组）\n")
+	writeClashYamlHeader(&b, "# Clash / Mihomo 单站订阅（按游戏分组）")
 	b.WriteString("proxies:\n")
 	b.WriteString(strings.Join(proxyBlocks, "\n"))
 	b.WriteString("\n\nproxy-groups:\n")
@@ -148,7 +159,7 @@ func GenClashYaml(inbounds []*model.Inbound, subHost string, requestHost string)
 	}
 
 	var b strings.Builder
-	b.WriteString("# Clash / Mihomo 单站订阅\n")
+	writeClashYamlHeader(&b, "# Clash / Mihomo 单站订阅")
 	b.WriteString("proxies:\n")
 	b.WriteString(strings.Join(proxyBlocks, "\n"))
 	b.WriteString("\n\nproxy-groups:\n")
@@ -168,7 +179,8 @@ func GenClashYaml(inbounds []*model.Inbound, subHost string, requestHost string)
 }
 
 const clusterHealthURL = "http://www.gstatic.com/generate_204"
-const clusterHealthInterval = 300
+const clusterHealthInterval = 60
+const clusterHealthTimeoutMs = 5000
 
 // buildClusterInboundGroupYamls 单入站站群组：首选池 load-balance，整组 fallback 链接兜底机
 func buildClusterInboundGroupYamls(groupName string, primary, fallback []string) (blocks []string, rootQuoted string) {
@@ -213,6 +225,7 @@ func clashLoadBalanceGroupYaml(groupName string, proxyNames []string) string {
 	gb.WriteString("    strategy: round-robin\n")
 	gb.WriteString("    url: " + clusterHealthURL + "\n")
 	gb.WriteString(fmt.Sprintf("    interval: %d\n", clusterHealthInterval))
+	gb.WriteString(fmt.Sprintf("    timeout: %d\n", clusterHealthTimeoutMs))
 	gb.WriteString("    proxies:\n")
 	for _, n := range proxyNames {
 		gb.WriteString("      - " + yamlQuote(n) + "\n")
@@ -242,6 +255,7 @@ func clashFallbackGroupYaml(groupName string, chain []string) string {
 	gb.WriteString("    type: fallback\n")
 	gb.WriteString("    url: " + clusterHealthURL + "\n")
 	gb.WriteString(fmt.Sprintf("    interval: %d\n", clusterHealthInterval))
+	gb.WriteString(fmt.Sprintf("    timeout: %d\n", clusterHealthTimeoutMs))
 	gb.WriteString("    proxies:\n")
 	for _, n := range chain {
 		gb.WriteString("      - " + yamlQuote(n) + "\n")

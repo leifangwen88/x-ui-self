@@ -147,6 +147,71 @@ func (s *PanelSyncService) migratePeersToMembersIfNeeded(cfg *PanelSyncConfig, m
 	return members
 }
 
+func remoteMemberDisplayName(m ClusterMember) string {
+	name := strings.TrimSpace(m.Name)
+	if name != "" && name != "本机" {
+		return name
+	}
+	if id := strings.TrimSpace(m.NodeId); id != "" {
+		return id
+	}
+	return "节点"
+}
+
+// filterImportedMembers 去掉种子/对端返回的「本机」记录，避免在本机成员表里显示成对端地址却标为本机
+func filterImportedMembers(members []ClusterMember, remoteSelfNodeId, remoteBaseURL string) []ClusterMember {
+	remoteURL := normalizePeerKey(remoteBaseURL)
+	remoteID := strings.TrimSpace(remoteSelfNodeId)
+	out := make([]ClusterMember, 0, len(members))
+	for _, m := range members {
+		url := normalizePeerKey(m.PublicURL)
+		id := strings.TrimSpace(m.NodeId)
+		if remoteID != "" && id == remoteID {
+			continue
+		}
+		if remoteURL != "" && url == remoteURL {
+			continue
+		}
+		if strings.TrimSpace(m.Name) == "本机" {
+			m.Name = remoteMemberDisplayName(m)
+		}
+		out = append(out, m)
+	}
+	return out
+}
+
+func hasMislabeledLocalMembers(members []ClusterMember, cfg *PanelSyncConfig) bool {
+	selfURL := normalizePeerKey(cfg.PublicURL)
+	for _, m := range members {
+		if strings.TrimSpace(m.Name) == "本机" && normalizePeerKey(m.PublicURL) != selfURL {
+			return true
+		}
+	}
+	return false
+}
+
+func (s *PanelSyncService) sanitizeClusterMembers(cfg *PanelSyncConfig, members []ClusterMember) []ClusterMember {
+	selfURL := normalizePeerKey(cfg.PublicURL)
+	selfID := strings.TrimSpace(cfg.NodeId)
+	cleaned := make([]ClusterMember, 0, len(members))
+	for _, m := range members {
+		url := normalizePeerKey(m.PublicURL)
+		id := strings.TrimSpace(m.NodeId)
+		isSelf := (selfID != "" && id == selfID) || (selfURL != "" && url == selfURL)
+		if isSelf {
+			continue
+		}
+		if strings.TrimSpace(m.Name) == "本机" {
+			if url == "" || url == selfURL {
+				continue
+			}
+			m.Name = remoteMemberDisplayName(m)
+		}
+		cleaned = append(cleaned, m)
+	}
+	return s.ensureSelfMember(cfg, cleaned)
+}
+
 func (s *PanelSyncService) ensureSelfMember(cfg *PanelSyncConfig, members []ClusterMember) []ClusterMember {
 	selfURL := normalizePeerKey(cfg.PublicURL)
 	if selfURL == "" || strings.TrimSpace(cfg.NodeId) == "" {
@@ -181,7 +246,7 @@ func (s *PanelSyncService) ListClusterMembers() (*ClusterMembersResponse, error)
 	if err != nil {
 		return nil, err
 	}
-	members = s.ensureSelfMember(cfg, members)
+	members = s.sanitizeClusterMembers(cfg, members)
 	return &ClusterMembersResponse{
 		SelfNodeId: cfg.NodeId,
 		Members:    members,
@@ -218,17 +283,18 @@ func (s *PanelSyncService) FetchAndMergeMembersFromSeed(seedBaseURL string) (int
 		return 0, common.NewError("种子节点地址为空")
 	}
 	seed = normalizePeerKey(seed)
-	remote, err := fetchPeerMembers(SyncPeerConfig{BaseURL: seed}, cfg.Secret)
+	remoteRes, err := fetchPeerMembers(SyncPeerConfig{BaseURL: seed}, cfg.Secret)
 	if err != nil {
 		return 0, common.NewError("拉取站群成员失败:", err)
 	}
+	remote := filterImportedMembers(remoteRes.Members, remoteRes.SelfNodeId, seed)
 	seedMember := ClusterMember{PublicURL: seed, Name: "种子节点", UpdatedAt: time.Now().UnixMilli()}
 	local, _ := s.loadClusterMembers()
 	local = s.migratePeersToMembersIfNeeded(cfg, local)
 	before := len(local)
 	local = mergeClusterMembers(local, remote)
 	local = mergeClusterMembers(local, []ClusterMember{seedMember})
-	local = s.ensureSelfMember(cfg, local)
+	local = s.sanitizeClusterMembers(cfg, local)
 	if err := s.saveClusterMembers(local); err != nil {
 		return 0, err
 	}
@@ -303,13 +369,21 @@ func (s *PanelSyncService) applyClusterMemberUpsert(raw json.RawMessage) error {
 		return err
 	}
 	members, _ := s.loadClusterMembers()
-	members = mergeClusterMembers(members, []ClusterMember{{
+	incoming := ClusterMember{
 		NodeId:    p.NodeId,
 		PublicURL: p.PublicURL,
 		Name:      p.Name,
 		Fallback:  p.Fallback,
 		UpdatedAt: p.UpdatedAt,
-	}})
+	}
+	selfURL := normalizePeerKey(cfg.PublicURL)
+	if incoming.NodeId != cfg.NodeId && normalizePeerKey(incoming.PublicURL) != selfURL {
+		if strings.TrimSpace(incoming.Name) == "本机" {
+			incoming.Name = remoteMemberDisplayName(incoming)
+		}
+	}
+	members = mergeClusterMembers(members, []ClusterMember{incoming})
+	members = s.sanitizeClusterMembers(cfg, members)
 	if err := s.saveClusterMembers(members); err != nil {
 		return err
 	}
@@ -340,6 +414,7 @@ func (s *PanelSyncService) applyClusterMemberRemove(raw json.RawMessage) error {
 		}
 		next = append(next, m)
 	}
+	next = s.sanitizeClusterMembers(cfg, next)
 	if err := s.saveClusterMembers(next); err != nil {
 		return err
 	}
@@ -352,7 +427,7 @@ func (s *PanelSyncService) applyClusterMemberRemove(raw json.RawMessage) error {
 
 func (s *PanelSyncService) persistMembersAndPeers(cfg *PanelSyncConfig, members []ClusterMember, announce bool) error {
 	members = s.migratePeersToMembersIfNeeded(cfg, members)
-	members = s.ensureSelfMember(cfg, members)
+	members = s.sanitizeClusterMembers(cfg, members)
 	if err := s.saveClusterMembers(members); err != nil {
 		return err
 	}

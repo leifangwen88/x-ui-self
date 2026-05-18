@@ -47,6 +47,46 @@ func (a *SubscriptionController) serve(c *gin.Context) {
 	}
 
 	switch subType {
+	case "v2ray-json", "xray-json":
+		body := a.subService.GenXrayJsonSubscription(subHost, reqHost, gameId)
+		if body == "" {
+			c.String(http.StatusNotFound, "No available nodes")
+			return
+		}
+		setXrayJsonHeaders(c, "v2ray.json")
+		c.String(http.StatusOK, body)
+	case "v2ray":
+		body := a.subService.GenV2raySubscription(subHost, reqHost, gameId)
+		if body == "" {
+			c.String(http.StatusNotFound, "No available nodes")
+			return
+		}
+		setV2raySubscriptionHeaders(c)
+		c.String(http.StatusOK, body)
+	case "cluster-v2ray-json", "cluster-xray-json":
+		if !a.subService.ClusterSubEnabled() {
+			c.String(http.StatusNotFound, "Cluster subscription disabled")
+			return
+		}
+		body := a.subService.GenClusterXrayJsonSubscription(subHost, reqHost, gameId)
+		if body == "" {
+			c.String(http.StatusNotFound, "No available cluster nodes")
+			return
+		}
+		setXrayJsonHeaders(c, "cluster-v2ray.json")
+		c.String(http.StatusOK, body)
+	case "cluster-v2ray":
+		if !a.subService.ClusterSubEnabled() {
+			c.String(http.StatusNotFound, "Cluster subscription disabled")
+			return
+		}
+		body := a.subService.GenClusterV2raySubscription(subHost, reqHost, gameId)
+		if body == "" {
+			c.String(http.StatusNotFound, "No available cluster nodes")
+			return
+		}
+		setV2raySubscriptionHeaders(c)
+		c.String(http.StatusOK, body)
 	case "cluster-shadowrocket", "cluster-sr":
 		if !a.subService.ClusterSubEnabled() {
 			c.String(http.StatusNotFound, "Cluster subscription disabled")
@@ -121,6 +161,20 @@ func (a *SubscriptionController) serve(c *gin.Context) {
 		c.Header("Content-Type", "text/plain; charset=utf-8")
 		c.String(http.StatusOK, body)
 	}
+}
+
+func setV2raySubscriptionHeaders(c *gin.Context) {
+	c.Header("Content-Type", "text/plain; charset=utf-8")
+	c.Header("Profile-Update-Interval", "24")
+	c.Header("Subscription-Userinfo", "upload=0; download=0; total=0; expire=0")
+}
+
+func setXrayJsonHeaders(c *gin.Context, filename string) {
+	c.Header("Content-Type", "application/json; charset=utf-8")
+	if filename != "" {
+		c.Header("Content-Disposition", "attachment; filename="+filename)
+	}
+	c.Header("Profile-Update-Interval", "24")
 }
 
 func hostOnlyFromRequest(c *gin.Context) string {

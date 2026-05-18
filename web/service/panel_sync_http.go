@@ -83,7 +83,7 @@ func fetchPeerOutbox(peer SyncPeerConfig, since int64, localSecret string) ([]Sy
 	return out.Obj, nil
 }
 
-func fetchPeerMembers(peer SyncPeerConfig, secret string) ([]ClusterMember, error) {
+func fetchPeerMembers(peer SyncPeerConfig, secret string) (*ClusterMembersResponse, error) {
 	base := normalizePeerBaseURL(peer.BaseURL)
 	if base == "" {
 		return nil, fmt.Errorf("peer base url empty")
@@ -116,7 +116,7 @@ func fetchPeerMembers(peer SyncPeerConfig, secret string) ([]ClusterMember, erro
 	if !out.Success || out.Obj == nil {
 		return nil, fmt.Errorf("invalid members response")
 	}
-	return out.Obj.Members, nil
+	return out.Obj, nil
 }
 
 func fetchPeerSnapshot(peer SyncPeerConfig, secret string) (*PanelSyncSnapshot, error) {

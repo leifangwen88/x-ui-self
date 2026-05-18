@@ -72,8 +72,8 @@
                             </template>
                             <p style="color:#666;margin-bottom:12px;">
                                 将 URL 填入客户端「订阅」；仅含<b>已启用</b>且支持链接的入站。密钥请勿泄露。
-                                <br>推荐使用<b>单站订阅</b>：本机全部节点，Clash / Mihomo 顶层策略组为「单站」，其下按游戏分子组。
-                                若已配置多机同步，可使用<b>站群订阅</b>：小火箭请用「Shadowrocket 站群」链接；Clash 用站群 Clash 链接。
+                                <br><b>V2Box（苹果）</b> 请用 <b>V2Ray JSON</b> 订阅 URL（含游戏分组与站群负载均衡），可从 URL 或剪贴板导入。
+                                <b>v2rayNG</b> 等仍可用「V2Ray 链接订阅」；<b>Clash / 小火箭</b> 用对应站群订阅。
                             </p>
                             <a-form layout="vertical">
                                 <a-form-item label="订阅节点域名（可选）" style="margin-bottom:12px;">
@@ -141,7 +141,9 @@
                                 <a-dropdown>
                                     <a-menu slot="overlay" @click="onBatchExportMenu">
                                         <a-menu-item key="links">分享链接（文本）</a-menu-item>
-                                        <a-menu-item key="subscribe">订阅 Base64（小火箭等）</a-menu-item>
+                                        <a-menu-item key="v2ray-json">V2Ray JSON 配置说明（V2Box 等）</a-menu-item>
+                                        <a-menu-item key="v2ray">V2Ray 链接订阅（v2rayNG 等）</a-menu-item>
+                                        <a-menu-item key="subscribe">通用订阅 Base64（小火箭 / Surge 等）</a-menu-item>
                                         <a-menu-item key="clash">Clash 配置（YAML）</a-menu-item>
                                     </a-menu>
                                     <a-button>
@@ -434,7 +436,7 @@
                 mode: 'single',
                 items: [],
             },
-            subInfo: { token: '', subHost: '', base64Path: '', linksPath: '', clashPath: '', totalInboundCount: 0, unspecifiedCount: 0, groups: [] },
+            subInfo: { token: '', subHost: '', base64Path: '', v2rayPath: '', v2rayJsonPath: '', linksPath: '', clashPath: '', totalInboundCount: 0, unspecifiedCount: 0, groups: [] },
             subHostInput: '',
             subPanelActive: [],
         },
@@ -447,8 +449,10 @@
             },
             subGroupUrlItems(group) {
                 return [
-                    { label: '通用订阅', path: group.base64Path },
-                    { label: 'Clash 订阅', path: group.clashPath },
+                    { label: 'V2Ray JSON（V2Box，含策略）', path: group.v2rayJsonPath },
+                    { label: 'V2Ray 链接订阅（v2rayNG）', path: group.v2rayPath },
+                    { label: '通用订阅（小火箭 / Surge / QX）', path: group.base64Path },
+                    { label: 'Clash 订阅（苹果可用 V2Box、Karing 等）', path: group.clashPath },
                     { label: '纯文本链接', path: group.linksPath },
                 ];
             },
@@ -1024,6 +1028,10 @@
                 const key = action.key;
                 if (key === 'links') {
                     this.batchExportLinks();
+                } else if (key === 'v2ray-json') {
+                    this.batchExportV2rayJson();
+                } else if (key === 'v2ray') {
+                    this.batchExportV2ray();
                 } else if (key === 'subscribe') {
                     this.batchExportSubscribe();
                 } else if (key === 'clash') {
@@ -1040,6 +1048,29 @@
                     `分享链接（${lines.length} 条，全部已启用入站）`,
                     lines.join('\r\n'),
                     'inbounds-links.txt'
+                );
+            },
+            batchExportV2rayJson() {
+                const url = this.subInfo.v2rayJsonPath ? this.subFullUrl(this.subInfo.v2rayJsonPath) : '';
+                const clusterUrl = (this.subInfo.cluster && this.subInfo.cluster.enabled && this.subInfo.cluster.v2rayJsonPath)
+                    ? this.subFullUrl(this.subInfo.cluster.v2rayJsonPath) : '';
+                const body = ExportUtil.v2rayJsonHint(url, clusterUrl, basePath);
+                txtModal.show('V2Ray JSON 订阅（V2Box）', body, 'v2ray-json-subscribe.txt');
+            },
+            batchExportV2ray() {
+                const b64 = ExportUtil.genV2raySubscriptionBase64(this.dbInbounds);
+                if (!b64) {
+                    this.$message.warning('没有可导出的 V2Ray 订阅内容');
+                    return;
+                }
+                const links = ExportUtil.genShareLinks(this.dbInbounds);
+                const subUrl = this.subInfo.v2rayPath ? this.subFullUrl(this.subInfo.v2rayPath) : '';
+                let body = ExportUtil.v2raySubscriptionHint(subUrl, basePath);
+                body += '\n共 ' + links.length + ' 条节点（全部已启用入站）\n\n' + b64;
+                txtModal.show(
+                    `V2Ray 订阅 Base64（${links.length} 条）`,
+                    body,
+                    'v2ray-subscription.txt'
                 );
             },
             batchExportSubscribe() {
@@ -1107,8 +1138,10 @@
                     return [];
                 }
                 return [
-                    { key: 'clash', label: 'Clash / Mihomo 单站订阅（顶层「单站」，按游戏分组）', path: this.subInfo.clashPath },
-                    { key: 'base64', label: '通用订阅（全部节点，小火箭 / Surge / QX 等）', path: this.subInfo.base64Path },
+                    { key: 'v2ray-json', label: 'V2Ray JSON 单站（V2Box 推荐，含游戏分组）', path: this.subInfo.v2rayJsonPath },
+                    { key: 'v2ray', label: 'V2Ray 链接订阅（v2rayNG 等，仅节点列表）', path: this.subInfo.v2rayPath },
+                    { key: 'clash', label: 'Clash / Mihomo 单站（Karing 等）', path: this.subInfo.clashPath },
+                    { key: 'base64', label: '通用订阅（小火箭 / Surge / QX 等）', path: this.subInfo.base64Path },
                     { key: 'links', label: '纯文本链接（全部节点）', path: this.subInfo.linksPath },
                 ];
             },
@@ -1118,9 +1151,11 @@
                     return [];
                 }
                 return [
-                    { key: 'cluster-shadowrocket', label: 'Shadowrocket 站群（推荐，含负载均衡策略组）', path: c.shadowrocketPath },
-                    { key: 'cluster-clash', label: 'Clash / Mihomo 站群（顶层「站群负载均衡」）', path: c.clashPath },
-                    { key: 'cluster-base64', label: '站群通用订阅（仅节点链接，无策略组）', path: c.base64Path },
+                    { key: 'cluster-v2ray-json', label: 'V2Ray JSON 站群（V2Box 推荐，含负载均衡/游戏分组）', path: c.v2rayJsonPath },
+                    { key: 'cluster-shadowrocket', label: 'Shadowrocket 站群（含策略组）', path: c.shadowrocketPath },
+                    { key: 'cluster-clash', label: 'Clash / Mihomo 站群（Karing 等）', path: c.clashPath },
+                    { key: 'cluster-v2ray', label: 'V2Ray 链接站群（v2rayNG，仅节点平铺）', path: c.v2rayPath },
+                    { key: 'cluster-base64', label: '站群通用订阅（小火箭等，含注释行）', path: c.base64Path },
                     { key: 'cluster-links', label: '站群纯文本链接', path: c.linksPath },
                 ];
             },

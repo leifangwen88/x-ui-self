@@ -138,9 +138,14 @@ func (s *PanelSyncService) GetConfig() (*PanelSyncConfig, error) {
 	if cfg.Peers == nil {
 		cfg.Peers = []SyncPeerConfig{}
 	}
-	members, _ := s.loadClusterMembers()
-	members = s.migratePeersToMembersIfNeeded(cfg, members)
-	members = s.ensureSelfMember(cfg, members)
+	rawMembers, _ := s.loadClusterMembers()
+	members = s.migratePeersToMembersIfNeeded(cfg, rawMembers)
+	sanitized := s.sanitizeClusterMembers(cfg, members)
+	if len(sanitized) != len(members) || hasMislabeledLocalMembers(members, cfg) {
+		_ = s.saveClusterMembers(sanitized)
+		_ = s.rebuildPeersFromMembers(cfg, sanitized)
+	}
+	members = sanitized
 	cfg.Members = members
 	cfg.Peers = s.membersToPeers(cfg, members)
 	cfg.PeerStatus = s.ListPeerAlignStatus(cfg)
