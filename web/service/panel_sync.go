@@ -37,6 +37,7 @@ type PanelSyncConfig struct {
 	PublicURL     string                 `json:"publicUrl" form:"publicUrl"`
 	LocalFallback bool                   `json:"localFallback" form:"localFallback"` // 本机在站群订阅中作为兜底节点
 	Peers         []SyncPeerConfig       `json:"peers" form:"peers"`
+	Members       []ClusterMember        `json:"members,omitempty"`
 	PeerStatus    []PanelPeerAlignStatus `json:"peerStatus,omitempty" form:"-"`
 }
 
@@ -137,6 +138,11 @@ func (s *PanelSyncService) GetConfig() (*PanelSyncConfig, error) {
 	if cfg.Peers == nil {
 		cfg.Peers = []SyncPeerConfig{}
 	}
+	members, _ := s.loadClusterMembers()
+	members = s.migratePeersToMembersIfNeeded(cfg, members)
+	members = s.ensureSelfMember(cfg, members)
+	cfg.Members = members
+	cfg.Peers = s.membersToPeers(cfg, members)
 	cfg.PeerStatus = s.ListPeerAlignStatus(cfg)
 	return cfg, nil
 }
@@ -156,11 +162,26 @@ func (s *PanelSyncService) SaveConfig(cfg *PanelSyncConfig) error {
 	_ = s.settingService.setString("panelSyncPublicURL", strings.TrimSpace(cfg.PublicURL))
 	_ = s.settingService.setBool("panelSyncEnabled", cfg.Enabled)
 	_ = s.settingService.setBool("panelSyncLocalFallback", cfg.LocalFallback)
-	raw, err := json.Marshal(cfg.Peers)
-	if err != nil {
-		return err
+	members, _ := s.loadClusterMembers()
+	members = s.migratePeersToMembersIfNeeded(cfg, members)
+	if len(cfg.Members) > 0 {
+		members = mergeClusterMembers(members, cfg.Members)
+	} else if len(cfg.Peers) > 0 {
+		now := time.Now().UnixMilli()
+		for _, p := range cfg.Peers {
+			url := normalizePeerKey(p.BaseURL)
+			if url == "" {
+				continue
+			}
+			members = mergeClusterMembers(members, []ClusterMember{{
+				PublicURL: url,
+				Name:      p.Name,
+				Fallback:  p.Fallback,
+				UpdatedAt: now,
+			}})
+		}
 	}
-	return s.settingService.setString("panelSyncPeers", string(raw))
+	return s.persistMembersAndPeers(cfg, members, cfg.Enabled)
 }
 
 func (s *PanelSyncService) Emit(typ string, payload interface{}) error {
@@ -277,6 +298,10 @@ func (s *PanelSyncService) ApplyEvent(evt SyncEventDTO) error {
 		err = s.applyMarkUnban(evt.Payload)
 	case SyncEventXrayTemplate:
 		err = s.applyXrayTemplate(evt.Payload)
+	case SyncEventClusterMemberUpsert:
+		err = s.applyClusterMemberUpsert(evt.Payload)
+	case SyncEventClusterMemberRemove:
+		err = s.applyClusterMemberRemove(evt.Payload)
 	default:
 		return nil
 	}

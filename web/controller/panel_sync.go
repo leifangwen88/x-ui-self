@@ -21,6 +21,7 @@ func NewPanelSyncPublicController(g *gin.RouterGroup) *PanelSyncController {
 	api.POST("/event", a.receiveEvent)
 	api.GET("/outbox", a.listOutbox)
 	api.GET("/snapshot", a.snapshot)
+	api.GET("/members", a.listMembers)
 	api.POST("/align-apply", a.alignApply)
 	return a
 }
@@ -31,6 +32,8 @@ func NewPanelSyncManageController(g *gin.RouterGroup) *PanelSyncController {
 	sg.POST("/config", a.getConfig)
 	sg.POST("/saveConfig", a.saveConfig)
 	sg.POST("/runNow", a.runNow)
+	sg.POST("/fetchMembers", a.fetchMembers)
+	sg.POST("/removeMember", a.removeMember)
 	sg.POST("/align/compare", a.alignCompare)
 	sg.POST("/align/apply", a.alignApplyLocal)
 	return a
@@ -81,6 +84,29 @@ func (a *PanelSyncController) listOutbox(c *gin.Context) {
 		return
 	}
 	jsonObj(c, list, nil)
+}
+
+func (a *PanelSyncController) listMembers(c *gin.Context) {
+	secret, ok := a.syncSecret(c)
+	if !ok {
+		c.String(401, "missing sync secret")
+		return
+	}
+	cfg, err := a.panelSync().GetConfig()
+	if err != nil {
+		jsonMsg(c, "站群成员", err)
+		return
+	}
+	if secret != cfg.Secret {
+		jsonMsg(c, "站群成员", common.NewError("同步密钥无效"))
+		return
+	}
+	res, err := a.panelSync().ListClusterMembers()
+	if err != nil {
+		jsonMsg(c, "站群成员", err)
+		return
+	}
+	jsonObj(c, res, nil)
 }
 
 func (a *PanelSyncController) snapshot(c *gin.Context) {
@@ -151,6 +177,14 @@ func (a *PanelSyncController) saveConfig(c *gin.Context) {
 			}
 		}
 	}
+	if len(req.Members) == 0 {
+		if membersJSON := strings.TrimSpace(c.PostForm("membersJson")); membersJSON != "" {
+			if err := json.Unmarshal([]byte(membersJSON), &req.Members); err != nil {
+				jsonMsg(c, "保存同步配置", err)
+				return
+			}
+		}
+	}
 	err := a.panelSync().SaveConfig(req)
 	jsonMsg(c, "保存同步配置", err)
 }
@@ -158,6 +192,39 @@ func (a *PanelSyncController) saveConfig(c *gin.Context) {
 func (a *PanelSyncController) runNow(c *gin.Context) {
 	go a.panelSync().RunSyncCycle()
 	jsonObj(c, map[string]bool{"ok": true}, nil)
+}
+
+func (a *PanelSyncController) fetchMembers(c *gin.Context) {
+	req := struct {
+		SeedBaseURL string `json:"seedBaseUrl" form:"seedBaseUrl"`
+	}{}
+	if err := c.ShouldBind(&req); err != nil {
+		jsonMsg(c, "同步站群成员", err)
+		return
+	}
+	added, err := a.panelSync().FetchAndMergeMembersFromSeed(req.SeedBaseURL)
+	if err != nil {
+		jsonMsg(c, "同步站群成员", err)
+		return
+	}
+	total := 0
+	if res, listErr := a.panelSync().ListClusterMembers(); listErr == nil && res != nil {
+		total = len(res.Members)
+	}
+	jsonObj(c, map[string]int{"added": added, "total": total}, nil)
+}
+
+func (a *PanelSyncController) removeMember(c *gin.Context) {
+	req := struct {
+		NodeId    string `json:"nodeId" form:"nodeId"`
+		PublicURL string `json:"publicUrl" form:"publicUrl"`
+	}{}
+	if err := c.ShouldBind(&req); err != nil {
+		jsonMsg(c, "移出站群", err)
+		return
+	}
+	err := a.panelSync().RemoveClusterMember(req.NodeId, req.PublicURL)
+	jsonMsg(c, "移出站群", err)
 }
 
 func (a *PanelSyncController) alignCompare(c *gin.Context) {

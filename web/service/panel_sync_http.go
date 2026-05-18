@@ -83,6 +83,42 @@ func fetchPeerOutbox(peer SyncPeerConfig, since int64, localSecret string) ([]Sy
 	return out.Obj, nil
 }
 
+func fetchPeerMembers(peer SyncPeerConfig, secret string) ([]ClusterMember, error) {
+	base := normalizePeerBaseURL(peer.BaseURL)
+	if base == "" {
+		return nil, fmt.Errorf("peer base url empty")
+	}
+	req, err := http.NewRequest(http.MethodGet, base+"/api/panel-sync/members", nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("X-Panel-Sync-Secret", secret)
+	client := &http.Client{Timeout: 20 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("members http %d", resp.StatusCode)
+	}
+	var out struct {
+		Success bool                   `json:"success"`
+		Obj     *ClusterMembersResponse `json:"obj"`
+	}
+	raw, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+	if err := json.Unmarshal(raw, &out); err != nil {
+		return nil, err
+	}
+	if !out.Success || out.Obj == nil {
+		return nil, fmt.Errorf("invalid members response")
+	}
+	return out.Obj.Members, nil
+}
+
 func fetchPeerSnapshot(peer SyncPeerConfig, secret string) (*PanelSyncSnapshot, error) {
 	base := normalizePeerBaseURL(peer.BaseURL)
 	if base == "" {

@@ -5,6 +5,8 @@ import "sort"
 // syncEventPriority 数值越小越优先（游戏 → SOCKS → 入站 → 其它）
 func syncEventPriority(typ string) int {
 	switch typ {
+	case SyncEventClusterMemberUpsert, SyncEventClusterMemberRemove:
+		return 5
 	case SyncEventGameUpsert, SyncEventGameDelete:
 		return 10
 	case SyncEventSocksUpsert, SyncEventSocksDelete:

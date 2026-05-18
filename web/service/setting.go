@@ -40,6 +40,7 @@ var defaultValueMap = map[string]string{
 	"panelSyncPublicURL":  "",
 	"panelSyncEnabled":    "false",
 	"panelSyncPeers":          "[]",
+	"panelSyncMembers":        "[]",
 	"panelSyncLocalFallback":  "false",
 }
 

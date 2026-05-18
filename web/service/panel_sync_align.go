@@ -221,6 +221,13 @@ func (s *PanelSyncService) ReceiveAlignApply(secret string, snap *PanelSyncSnaps
 	originBaseURL = normalizePeerBaseURL(originBaseURL)
 	if originBaseURL != "" {
 		s.markPeerAligned(originBaseURL, alignedAt)
+		members, _ := s.loadClusterMembers()
+		members = mergeClusterMembers(members, []ClusterMember{{
+			PublicURL: originBaseURL,
+			Name:      "对端节点",
+			UpdatedAt: alignedAt,
+		}})
+		_ = s.persistMembersAndPeers(cfg, members, false)
 	}
 	s.xrayService.SetToNeedRestart()
 	return nil

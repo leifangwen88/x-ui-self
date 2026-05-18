@@ -88,9 +88,10 @@
                             <a-card style="background:#fff;" :bordered="false">
                                 <p style="color:#666;margin-bottom:16px;">
                                     开启后，游戏、SOCKS 池、入站（含名称与绑定 IP）、IP 标记、Xray 模板等会与其它节点保持一致；
-                                    面板端口、登录密码、同步密钥等仍为本机独有。加入集群前必须对每个对等节点完成
-                                    <b>「首次对齐向导」</b>（全部项逐项协商，不可跳过）。对等地址示例：
-                                    <code>http://1.2.3.4:54321/laylee</code>（http+IP+端口，不要末尾斜杠）。
+                                    面板端口、登录密码、同步密钥等仍为本机独有。新机只需填写<b>一个已对齐的种子节点</b>地址并
+                                    <b>「从种子同步站群成员」</b>，即可拉取全站群列表；成员变更会同步到各节点。
+                                    加入集群前须对每个对端完成 <b>「首次对齐向导」</b>。地址示例：
+                                    <code>http://1.2.3.4:54321/laylee</code>（不要末尾斜杠）。
                                 </p>
                                 <a-form layout="vertical">
                                     <a-form-item label="启用多机同步">
@@ -108,31 +109,42 @@
                                     <a-form-item>
                                         <a-checkbox v-model="syncConfig.localFallback">本机为站群兜底节点（高价稳定，仅当其他节点不可用时使用）</a-checkbox>
                                     </a-form-item>
-                                    <a-form-item label="对等节点">
-                                        <a-button type="dashed" icon="plus" @click="addSyncPeer" style="margin-bottom:8px;">添加节点</a-button>
-                                        <div v-for="(peer, idx) in syncConfig.peers" :key="idx"
+                                    <a-form-item label="种子节点（任意一台已对齐节点即可）">
+                                        <a-row :gutter="8">
+                                            <a-col :span="16">
+                                                <a-input v-model="syncSeedUrl" placeholder="http://IP:端口/根路径"></a-input>
+                                            </a-col>
+                                            <a-col :span="8">
+                                                <a-button type="primary" :loading="syncFetchingMembers"
+                                                          @click="fetchClusterMembers">从种子同步站群成员</a-button>
+                                            </a-col>
+                                        </a-row>
+                                    </a-form-item>
+                                    <a-form-item label="站群成员（可移出过期服务器，变更将同步到全站群）">
+                                        <div v-if="!clusterMembersExceptSelf.length" style="color:#999;margin-bottom:8px;">
+                                            暂无其它成员，请先填写种子地址并同步站群成员。
+                                        </div>
+                                        <div v-for="m in clusterMembersExceptSelf" :key="memberRowKey(m)"
                                              style="border:1px solid #e8e8e8;padding:12px;margin-bottom:8px;border-radius:4px;">
-                                            <a-row :gutter="8">
-                                                <a-col :span="6">
-                                                    <a-input v-model="peer.name" placeholder="备注名"></a-input>
+                                            <a-row :gutter="8" type="flex" align="middle">
+                                                <a-col :span="5">
+                                                    <strong>[[ m.name || '未命名' ]]</strong>
+                                                    <span v-if="m.fallback" style="margin-left:6px;">
+                                                        <a-tag color="blue">兜底</a-tag>
+                                                    </span>
                                                 </a-col>
-                                                <a-col :span="10">
-                                                    <a-input v-model="peer.baseUrl" placeholder="http://IP:端口/根路径"></a-input>
+                                                <a-col :span="11">
+                                                    <code style="font-size:12px;">[[ m.publicUrl ]]</code>
                                                 </a-col>
-                                                <a-col :span="6">
-                                                    <a-input v-model="peer.secret" placeholder="留空则用本机密钥"></a-input>
-                                                </a-col>
-                                                <a-col :span="2">
-                                                    <a-button type="danger" icon="delete" @click="removeSyncPeer(idx)"></a-button>
+                                                <a-col :span="8" style="text-align:right;">
+                                                    <a-tag v-if="syncPeerStatus(m.publicUrl).alignedAt > 0" color="green">已对齐</a-tag>
+                                                    <a-tag v-else color="orange">未对齐</a-tag>
+                                                    <a-button type="link" size="small"
+                                                              @click="openAlignWizardByUrl(m.publicUrl)">首次对齐向导</a-button>
+                                                    <a-button type="link" size="small" style="color:#f5222d;"
+                                                              @click="removeClusterMember(m)">移出站群</a-button>
                                                 </a-col>
                                             </a-row>
-                                            <a-checkbox v-model="peer.fallback" style="margin-top:8px;">兜底节点（高价稳定，优先后备）</a-checkbox>
-                                            <div v-if="syncPeerStatus(peer.baseUrl)" style="margin-top:6px;font-size:12px;">
-                                                <a-tag v-if="syncPeerStatus(peer.baseUrl).alignedAt > 0" color="green">已对齐</a-tag>
-                                                <a-tag v-else color="orange">未对齐</a-tag>
-                                                <a-button type="link" size="small" style="padding:0 8px;"
-                                                          @click="openAlignWizard(idx)">首次对齐向导</a-button>
-                                            </div>
                                         </div>
                                     </a-form-item>
                                     <a-space>
@@ -271,9 +283,11 @@
             backupFileName: '',
             backupPreview: null,
             backupResetTraffic: true,
-            syncConfig: { enabled: false, nodeId: '', secret: '', publicUrl: '', peers: [], peerStatus: [] },
+            syncConfig: { enabled: false, nodeId: '', secret: '', publicUrl: '', peers: [], members: [], peerStatus: [] },
+            syncSeedUrl: '',
             syncSaving: false,
             syncRunning: false,
+            syncFetchingMembers: false,
             alignWizardVisible: false,
             alignWizardPeerIndex: -1,
             alignPeerLabel: '',
@@ -297,6 +311,24 @@
             ],
         },
         computed: {
+            clusterMembersExceptSelf() {
+                const selfUrl = this.normPeerUrl(this.syncConfig.publicUrl);
+                const selfId = (this.syncConfig.nodeId || '').trim();
+                const list = this.syncConfig.members || [];
+                return list.filter(m => {
+                    const url = this.normPeerUrl(m.publicUrl);
+                    if (!url) {
+                        return false;
+                    }
+                    if (url === selfUrl) {
+                        return false;
+                    }
+                    if (selfId && (m.nodeId || '').trim() === selfId) {
+                        return false;
+                    }
+                    return true;
+                });
+            },
             alignTableRows() {
                 if (!this.alignCompare) {
                     return [];
@@ -442,13 +474,13 @@
                     if (!this.syncConfig.peers) {
                         this.syncConfig.peers = [];
                     }
+                    if (!this.syncConfig.members) {
+                        this.syncConfig.members = [];
+                    }
                 }
             },
-            addSyncPeer() {
-                this.syncConfig.peers.push({ name: '', baseUrl: '', secret: '', fallback: false });
-            },
-            removeSyncPeer(idx) {
-                this.syncConfig.peers.splice(idx, 1);
+            memberRowKey(m) {
+                return (m && (m.nodeId || m.publicUrl)) || Math.random().toString(36);
             },
             buildSyncSavePayload() {
                 const c = this.syncConfig || {};
@@ -458,8 +490,48 @@
                     secret: c.secret || '',
                     publicUrl: c.publicUrl || '',
                     localFallback: !!c.localFallback,
-                    peersJson: JSON.stringify(c.peers || []),
+                    membersJson: JSON.stringify(c.members || []),
                 };
+            },
+            async fetchClusterMembers() {
+                const seed = (this.syncSeedUrl || '').trim();
+                if (!seed) {
+                    this.$message.warning('请填写种子节点地址');
+                    return;
+                }
+                this.syncFetchingMembers = true;
+                try {
+                    await this.saveSyncConfig();
+                    const msg = await HttpUtil.post('/xui/sync/fetchMembers', { seedBaseUrl: seed });
+                    if (msg.success) {
+                        const added = (msg.obj && msg.obj.added) || 0;
+                        const total = (msg.obj && msg.obj.total) || 0;
+                        this.$message.success(`站群成员已更新（新增 ${added}，共 ${total} 台）`);
+                        await this.loadSyncConfig();
+                    }
+                } finally {
+                    this.syncFetchingMembers = false;
+                }
+            },
+            removeClusterMember(m) {
+                const label = (m && (m.publicUrl || m.nodeId)) || '该节点';
+                this.$confirm({
+                    title: '移出站群',
+                    content: `确定将 ${label} 移出站群？其它节点将同步停止与该服务器的同步。`,
+                    okText: '移出',
+                    okType: 'danger',
+                    cancelText: '取消',
+                    onOk: async () => {
+                        const msg = await HttpUtil.post('/xui/sync/removeMember', {
+                            nodeId: (m && m.nodeId) || '',
+                            publicUrl: (m && m.publicUrl) || '',
+                        });
+                        if (msg.success) {
+                            this.$message.success('已移出站群');
+                            await this.loadSyncConfig();
+                        }
+                    },
+                });
             },
             async saveSyncConfig() {
                 this.syncSaving = true;
@@ -494,6 +566,15 @@
                 }
                 const st = this.syncConfig.peerStatus.find(p => this.normPeerUrl(p.baseUrl) === key);
                 return st || { alignedAt: 0 };
+            },
+            openAlignWizardByUrl(url) {
+                const key = this.normPeerUrl(url);
+                const idx = (this.syncConfig.peers || []).findIndex(p => this.normPeerUrl(p.baseUrl) === key);
+                if (idx < 0) {
+                    this.$message.warning('对端不在同步列表中，请先「从种子同步站群成员」');
+                    return;
+                }
+                this.openAlignWizard(idx);
             },
             openAlignWizard(idx) {
                 this.alignWizardPeerIndex = idx;
