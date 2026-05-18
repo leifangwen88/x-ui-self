@@ -72,8 +72,8 @@
                             </template>
                             <p style="color:#666;margin-bottom:12px;">
                                 将 URL 填入客户端「订阅」；仅含<b>已启用</b>且支持链接的入站。密钥请勿泄露。
-                                <br>推荐使用<b>总订阅</b>：一条链接包含全部节点；Clash / Mihomo 内按游戏分组显示（未绑定游戏的入站在「未指定游戏」组）。
-                                下方可按游戏单独订阅（可选）。
+                                <br>推荐使用<b>单站订阅</b>：本机全部节点，Clash / Mihomo 顶层策略组为「单站」，其下按游戏分子组。
+                                若已配置多机同步，可使用<b>站群订阅</b>：小火箭请用「Shadowrocket 站群」链接；Clash 用站群 Clash 链接。
                             </p>
                             <a-form layout="vertical">
                                 <a-form-item label="订阅节点域名（可选）" style="margin-bottom:12px;">
@@ -83,12 +83,32 @@
                             </a-form>
                             <div style="margin-bottom:16px;">
                                 <div style="font-weight:600;margin-bottom:8px;">
-                                    总订阅
+                                    单站订阅
                                     <span v-if="subInfo.totalInboundCount" style="font-weight:normal;color:#666;">
                                         （[[ subInfo.totalInboundCount ]] 个入站<span v-if="subInfo.unspecifiedCount">，其中未指定游戏 [[ subInfo.unspecifiedCount ]] 个</span>）
                                     </span>
                                 </div>
                                 <a-list size="small" bordered :data-source="subUrlList">
+                                    <a-list-item slot="renderItem" slot-scope="item">
+                                        <a-list-item-meta :title="item.label" :description="subFullUrl(item.path)"></a-list-item-meta>
+                                        <a-button type="link" size="small" @click="copyText(subFullUrl(item.path))">复制</a-button>
+                                    </a-list-item>
+                                </a-list>
+                            </div>
+                            <div v-if="subInfo.cluster && subInfo.cluster.enabled" style="margin-bottom:16px;">
+                                <div style="font-weight:600;margin-bottom:8px;">
+                                    站群订阅
+                                    <span style="font-weight:normal;color:#666;">
+                                        （[[ subInfo.cluster.peerCount ]] 台对等节点，已对齐 [[ subInfo.cluster.alignedCount ]]）
+                                    </span>
+                                </div>
+                                <a-alert v-if="subInfo.cluster.hint" type="warning" show-icon style="margin-bottom:8px;"
+                                         :message="subInfo.cluster.hint"></a-alert>
+                                <p style="color:#666;font-size:12px;margin-bottom:8px;">
+                                    按<b>游戏 → 入站备注</b>分组（如各机「入口1」合并为一组并在 A/B/C 间 load-balance）；
+                                    兜底服务器在设置 → 多机同步勾选，仅在该入口首选全挂时启用。请保证各机<b>同端口入站备注一致</b>。
+                                </p>
+                                <a-list size="small" bordered :data-source="clusterSubUrlList">
                                     <a-list-item slot="renderItem" slot-scope="item">
                                         <a-list-item-meta :title="item.label" :description="subFullUrl(item.path)"></a-list-item-meta>
                                         <a-button type="link" size="small" @click="copyText(subFullUrl(item.path))">复制</a-button>
@@ -1087,9 +1107,21 @@
                     return [];
                 }
                 return [
-                    { key: 'clash', label: 'Clash / Mihomo 总订阅（客户端内按游戏分组）', path: this.subInfo.clashPath },
+                    { key: 'clash', label: 'Clash / Mihomo 单站订阅（顶层「单站」，按游戏分组）', path: this.subInfo.clashPath },
                     { key: 'base64', label: '通用订阅（全部节点，小火箭 / Surge / QX 等）', path: this.subInfo.base64Path },
                     { key: 'links', label: '纯文本链接（全部节点）', path: this.subInfo.linksPath },
+                ];
+            },
+            clusterSubUrlList() {
+                const c = this.subInfo.cluster;
+                if (!c || !c.enabled) {
+                    return [];
+                }
+                return [
+                    { key: 'cluster-shadowrocket', label: 'Shadowrocket 站群（推荐，含负载均衡策略组）', path: c.shadowrocketPath },
+                    { key: 'cluster-clash', label: 'Clash / Mihomo 站群（顶层「站群负载均衡」）', path: c.clashPath },
+                    { key: 'cluster-base64', label: '站群通用订阅（仅节点链接，无策略组）', path: c.base64Path },
+                    { key: 'cluster-links', label: '站群纯文本链接', path: c.linksPath },
                 ];
             },
             subGameGroups() {

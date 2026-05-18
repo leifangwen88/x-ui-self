@@ -206,6 +206,13 @@ func (s *Server) initRouter() (*gin.Engine, error) {
 	s.index = controller.NewIndexController(g)
 	s.server = controller.NewServerController(g)
 	s.xui = controller.NewXUIController(g)
+	controller.NewPanelSyncPublicController(g)
+
+	panelSync := service.PanelSyncService{
+		XrayService:    s.xrayService,
+		SettingService: s.settingService,
+	}
+	service.InitPanelSync(&panelSync)
 
 	return engine, nil
 }
@@ -295,6 +302,12 @@ func (s *Server) startTask() {
 
 	// 每 30 秒检查一次 inbound 流量超出和到期的情况
 	s.cron.AddJob("@every 30s", job.NewCheckInboundJob())
+	// 多节点面板数据同步（兜底重推/拉取；日常变更靠操作后即时推送）
+	s.cron.AddFunc("@every 3m", func() {
+		if globalPanelSync := service.GetPanelSync(); globalPanelSync != nil {
+			globalPanelSync.RunSyncCycle()
+		}
+	})
 	// 每一天提示一次流量情况,上海时间8点30
 	var entry cron.EntryID
 	isTgbotenabled, err := s.settingService.GetTgbotenabled()

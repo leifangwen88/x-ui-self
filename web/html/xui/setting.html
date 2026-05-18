@@ -84,6 +84,131 @@
                                 <setting-list-item type="text" title="时区" desc="定时任务按照该时区的时间运行，重启面板生效" v-model="allSetting.timeLocation"></setting-list-item>
                             </a-list>
                         </a-tab-pane>
+                        <a-tab-pane key="7" tab="多机同步">
+                            <a-card style="background:#fff;" :bordered="false">
+                                <p style="color:#666;margin-bottom:16px;">
+                                    开启后，游戏、SOCKS 池、入站（含名称与绑定 IP）、IP 标记、Xray 模板等会与其它节点保持一致；
+                                    面板端口、登录密码、同步密钥等仍为本机独有。加入集群前必须对每个对等节点完成
+                                    <b>「首次对齐向导」</b>（全部项逐项协商，不可跳过）。对等地址示例：
+                                    <code>http://1.2.3.4:54321/laylee</code>（http+IP+端口，不要末尾斜杠）。
+                                </p>
+                                <a-form layout="vertical">
+                                    <a-form-item label="启用多机同步">
+                                        <a-switch v-model="syncConfig.enabled"></a-switch>
+                                    </a-form-item>
+                                    <a-form-item label="本节点 ID（自动生成，可修改）">
+                                        <a-input v-model="syncConfig.nodeId" style="max-width:480px;"></a-input>
+                                    </a-form-item>
+                                    <a-form-item label="本机对外地址（供对端识别，与下方对等地址格式一致）">
+                                        <a-input v-model="syncConfig.publicUrl" placeholder="http://本机IP:端口/根路径" style="max-width:480px;"></a-input>
+                                    </a-form-item>
+                                    <a-form-item label="同步密钥（各节点需一致，或在对等节点单独填写）">
+                                        <a-input v-model="syncConfig.secret" style="max-width:480px;"></a-input>
+                                    </a-form-item>
+                                    <a-form-item>
+                                        <a-checkbox v-model="syncConfig.localFallback">本机为站群兜底节点（高价稳定，仅当其他节点不可用时使用）</a-checkbox>
+                                    </a-form-item>
+                                    <a-form-item label="对等节点">
+                                        <a-button type="dashed" icon="plus" @click="addSyncPeer" style="margin-bottom:8px;">添加节点</a-button>
+                                        <div v-for="(peer, idx) in syncConfig.peers" :key="idx"
+                                             style="border:1px solid #e8e8e8;padding:12px;margin-bottom:8px;border-radius:4px;">
+                                            <a-row :gutter="8">
+                                                <a-col :span="6">
+                                                    <a-input v-model="peer.name" placeholder="备注名"></a-input>
+                                                </a-col>
+                                                <a-col :span="10">
+                                                    <a-input v-model="peer.baseUrl" placeholder="http://IP:端口/根路径"></a-input>
+                                                </a-col>
+                                                <a-col :span="6">
+                                                    <a-input v-model="peer.secret" placeholder="留空则用本机密钥"></a-input>
+                                                </a-col>
+                                                <a-col :span="2">
+                                                    <a-button type="danger" icon="delete" @click="removeSyncPeer(idx)"></a-button>
+                                                </a-col>
+                                            </a-row>
+                                            <a-checkbox v-model="peer.fallback" style="margin-top:8px;">兜底节点（高价稳定，优先后备）</a-checkbox>
+                                            <div v-if="syncPeerStatus(peer.baseUrl)" style="margin-top:6px;font-size:12px;">
+                                                <a-tag v-if="syncPeerStatus(peer.baseUrl).alignedAt > 0" color="green">已对齐</a-tag>
+                                                <a-tag v-else color="orange">未对齐</a-tag>
+                                                <a-button type="link" size="small" style="padding:0 8px;"
+                                                          @click="openAlignWizard(idx)">首次对齐向导</a-button>
+                                            </div>
+                                        </div>
+                                    </a-form-item>
+                                    <a-space>
+                                        <a-button type="primary" :loading="syncSaving" @click="saveSyncConfig">保存同步配置</a-button>
+                                        <a-button :loading="syncRunning" @click="runSyncNow">立即同步一轮</a-button>
+                                    </a-space>
+                                </a-form>
+                            </a-card>
+                            <a-modal v-model="alignWizardVisible" title="加入集群 · 首次对齐" width="720px"
+                                     :confirm-loading="alignApplying" @ok="confirmAlignApply" ok-text="确认对齐"
+                                     cancel-text="取消" :mask-closable="false">
+                                <a-alert type="warning" show-icon style="margin-bottom:12px;">
+                                    <template slot="message">全部同步项必须逐项协商</template>
+                                    <template slot="description">
+                                        下列每一项都需选择「以本机为准」或「以对端为准」（IP 标记可选合并）。
+                                        确认后将覆盖本机对应数据，不可跳过。建议先保存同步配置与密钥。
+                                    </template>
+                                </a-alert>
+                                <p v-if="alignPeerLabel" style="margin-bottom:12px;">对端：[[ alignPeerLabel ]]</p>
+                                <a-spin :spinning="alignComparing">
+                                    <a-button type="primary" icon="search" :disabled="alignWizardPeerIndex < 0"
+                                              @click="runAlignCompare" style="margin-bottom:16px;">拉取对端并对比</a-button>
+                                    <div v-if="alignCompare">
+                                        <a-table size="small" :pagination="false" bordered
+                                                 :columns="alignTableColumns" :data-source="alignTableRows"
+                                                 :row-key="r => r.key"></a-table>
+                                        <a-divider>协商对齐（必选）</a-divider>
+                                        <a-form layout="vertical">
+                                            <a-form-item label="游戏">
+                                                <a-radio-group v-model="alignChoices.gamesSource">
+                                                    <a-radio value="local">以本机为准</a-radio>
+                                                    <a-radio value="peer">以对端为准</a-radio>
+                                                </a-radio-group>
+                                            </a-form-item>
+                                            <a-form-item label="SOCKS5 池">
+                                                <a-radio-group v-model="alignChoices.socksSource">
+                                                    <a-radio value="local">以本机为准</a-radio>
+                                                    <a-radio value="peer">以对端为准</a-radio>
+                                                </a-radio-group>
+                                            </a-form-item>
+                                            <a-form-item label="入站 + 绑定 IP / 游戏">
+                                                <a-radio-group v-model="alignChoices.inboundsSource">
+                                                    <a-radio value="local">以本机为准</a-radio>
+                                                    <a-radio value="peer">以对端为准</a-radio>
+                                                </a-radio-group>
+                                                <div style="color:#888;font-size:12px;margin-top:4px;">
+                                                    含入站端口、协议、启用状态、SOCKS 绑定、游戏绑定等
+                                                </div>
+                                            </a-form-item>
+                                            <a-form-item label="入站名称（备注）">
+                                                <a-radio-group v-model="alignChoices.inboundRemarkSource">
+                                                    <a-radio value="local">以本机为准</a-radio>
+                                                    <a-radio value="peer">以对端为准</a-radio>
+                                                </a-radio-group>
+                                            </a-form-item>
+                                            <a-form-item label="IP 标记（用过/封禁）">
+                                                <a-radio-group v-model="alignChoices.marksSource">
+                                                    <a-radio value="merge">合并（封禁并集，推荐）</a-radio>
+                                                    <a-radio value="local">以本机为准</a-radio>
+                                                    <a-radio value="peer">以对端为准</a-radio>
+                                                </a-radio-group>
+                                            </a-form-item>
+                                            <a-form-item label="Xray 配置模板">
+                                                <a-radio-group v-model="alignChoices.xrayTemplateSource">
+                                                    <a-radio value="local">以本机为准</a-radio>
+                                                    <a-radio value="peer">以对端为准</a-radio>
+                                                </a-radio-group>
+                                            </a-form-item>
+                                            <a-checkbox v-model="alignChoices.pushToPeer" :default-checked="true">
+                                                对齐结果同步到对端（推荐，两台只需在一台执行）
+                                            </a-checkbox>
+                                        </a-form>
+                                    </div>
+                                </a-spin>
+                            </a-modal>
+                        </a-tab-pane>
                         <a-tab-pane key="6" tab="迁移备份">
                             <a-card style="background:#fff;" :bordered="false">
                                 <p style="color:#666;margin-bottom:16px;">
@@ -146,6 +271,54 @@
             backupFileName: '',
             backupPreview: null,
             backupResetTraffic: true,
+            syncConfig: { enabled: false, nodeId: '', secret: '', publicUrl: '', peers: [], peerStatus: [] },
+            syncSaving: false,
+            syncRunning: false,
+            alignWizardVisible: false,
+            alignWizardPeerIndex: -1,
+            alignPeerLabel: '',
+            alignComparing: false,
+            alignApplying: false,
+            alignCompare: null,
+            alignChoices: {
+                gamesSource: 'local',
+                socksSource: 'local',
+                inboundsSource: 'local',
+                inboundRemarkSource: 'local',
+                marksSource: 'merge',
+                xrayTemplateSource: 'local',
+                pushToPeer: true,
+            },
+            alignTableColumns: [
+                { title: '类别', dataIndex: 'category', key: 'category' },
+                { title: '本机数量', dataIndex: 'local', key: 'local' },
+                { title: '对端数量', dataIndex: 'peer', key: 'peer' },
+                { title: '差异摘要', dataIndex: 'diff', key: 'diff' },
+            ],
+        },
+        computed: {
+            alignTableRows() {
+                if (!this.alignCompare) {
+                    return [];
+                }
+                const c = this.alignCompare;
+                const fmt = (d) => {
+                    if (!d) return '-';
+                    const parts = [];
+                    if (d.localOnly > 0) parts.push('仅本机 ' + d.localOnly);
+                    if (d.peerOnly > 0) parts.push('仅对端 ' + d.peerOnly);
+                    if (d.conflict > 0) parts.push('冲突 ' + d.conflict);
+                    return parts.length ? parts.join('，') : '一致';
+                };
+                return [
+                    { key: 'games', category: '游戏', local: c.local.games, peer: c.peer.games, diff: fmt(c.diff.games) },
+                    { key: 'socks', category: 'SOCKS5 池', local: c.local.socks, peer: c.peer.socks, diff: fmt(c.diff.socks) },
+                    { key: 'inbounds', category: '入站+绑定', local: c.local.inbounds, peer: c.peer.inbounds, diff: fmt(c.diff.inbounds) },
+                    { key: 'inboundRemarks', category: '入站名称', local: c.local.inbounds, peer: c.peer.inbounds, diff: fmt(c.diff.inboundRemarks) },
+                    { key: 'marks', category: 'IP 标记', local: c.local.marks, peer: c.peer.marks, diff: fmt(c.diff.marks) },
+                    { key: 'xray', category: 'Xray 模板', local: c.local.xrayTemplate, peer: c.peer.xrayTemplate, diff: fmt(c.diff.xrayTemplate) },
+                ];
+            },
         },
         methods: {
             loading(spinning = true) {
@@ -262,6 +435,138 @@
                     },
                 });
             },
+            async loadSyncConfig() {
+                const msg = await HttpUtil.post('/xui/sync/config');
+                if (msg.success && msg.obj) {
+                    this.syncConfig = msg.obj;
+                    if (!this.syncConfig.peers) {
+                        this.syncConfig.peers = [];
+                    }
+                }
+            },
+            addSyncPeer() {
+                this.syncConfig.peers.push({ name: '', baseUrl: '', secret: '', fallback: false });
+            },
+            removeSyncPeer(idx) {
+                this.syncConfig.peers.splice(idx, 1);
+            },
+            async saveSyncConfig() {
+                this.syncSaving = true;
+                try {
+                    const msg = await HttpUtil.post('/xui/sync/saveConfig', this.syncConfig);
+                    if (msg.success) {
+                        this.$message.success('同步配置已保存');
+                        await this.loadSyncConfig();
+                    }
+                } finally {
+                    this.syncSaving = false;
+                }
+            },
+            async runSyncNow() {
+                this.syncRunning = true;
+                try {
+                    const msg = await HttpUtil.post('/xui/sync/runNow');
+                    if (msg.success) {
+                        this.$message.success('已触发同步');
+                    }
+                } finally {
+                    this.syncRunning = false;
+                }
+            },
+            normPeerUrl(url) {
+                return (url || '').trim().replace(/\/+$/, '');
+            },
+            syncPeerStatus(baseUrl) {
+                const key = this.normPeerUrl(baseUrl);
+                if (!key || !this.syncConfig.peerStatus) {
+                    return { alignedAt: 0 };
+                }
+                const st = this.syncConfig.peerStatus.find(p => this.normPeerUrl(p.baseUrl) === key);
+                return st || { alignedAt: 0 };
+            },
+            openAlignWizard(idx) {
+                this.alignWizardPeerIndex = idx;
+                const p = this.syncConfig.peers[idx] || {};
+                this.alignPeerLabel = ((p.name || '对端') + ' · ' + (p.baseUrl || '')).trim();
+                this.alignCompare = null;
+                this.alignChoices = {
+                    gamesSource: 'local',
+                    socksSource: 'local',
+                    inboundsSource: 'local',
+                    inboundRemarkSource: 'local',
+                    marksSource: 'merge',
+                    xrayTemplateSource: 'local',
+                    pushToPeer: true,
+                };
+                this.alignWizardVisible = true;
+            },
+            async runAlignCompare() {
+                if (this.alignWizardPeerIndex < 0) {
+                    return;
+                }
+                this.alignComparing = true;
+                try {
+                    await this.saveSyncConfig();
+                    const msg = await HttpUtil.post('/xui/sync/align/compare', {
+                        peerIndex: this.alignWizardPeerIndex,
+                    });
+                    if (msg.success) {
+                        this.alignCompare = msg.obj;
+                        if (!msg.obj.peerReachable) {
+                            this.$message.error('无法连接对端：' + (msg.obj.peerError || '请检查地址与密钥'));
+                        }
+                    }
+                } finally {
+                    this.alignComparing = false;
+                }
+            },
+            confirmAlignApply() {
+                if (!this.alignCompare || !this.alignCompare.peerReachable) {
+                    this.$message.warning('请先成功拉取对端并对比');
+                    return Promise.reject();
+                }
+                return new Promise((resolve, reject) => {
+                    this.$confirm({
+                        title: '确认首次对齐',
+                        content: '将覆盖本机全部同步项（游戏、SOCKS、入站、名称、IP 标记、Xray 模板）。若勾选同步到对端，对端也将应用相同结果。确定继续？',
+                        okText: '确认',
+                        okType: 'danger',
+                        cancelText: '取消',
+                        onOk: async () => {
+                            this.alignApplying = true;
+                            try {
+                                const msg = await HttpUtil.post('/xui/sync/align/apply', {
+                                    peerIndex: this.alignWizardPeerIndex,
+                                    gamesSource: this.alignChoices.gamesSource,
+                                    socksSource: this.alignChoices.socksSource,
+                                    inboundsSource: this.alignChoices.inboundsSource,
+                                    inboundRemarkSource: this.alignChoices.inboundRemarkSource,
+                                    marksSource: this.alignChoices.marksSource,
+                                    xrayTemplateSource: this.alignChoices.xrayTemplateSource,
+                                    pushToPeer: this.alignChoices.pushToPeer,
+                                });
+                                if (msg.success) {
+                                    let tip = '首次对齐完成';
+                                    if (msg.obj && msg.obj.peerPushErr) {
+                                        tip += '（对端推送失败：' + msg.obj.peerPushErr + '）';
+                                    }
+                                    this.$message.success(tip);
+                                    this.alignWizardVisible = false;
+                                    await this.loadSyncConfig();
+                                    resolve();
+                                } else {
+                                    reject();
+                                }
+                            } catch (e) {
+                                reject(e);
+                            } finally {
+                                this.alignApplying = false;
+                            }
+                        },
+                        onCancel: () => reject(),
+                    });
+                });
+            },
             async restartPanel() {
                 await new Promise(resolve => {
                     this.$confirm({
@@ -284,6 +589,7 @@
         },
         async mounted() {
             await this.getAllSetting();
+            await this.loadSyncConfig();
             while (true) {
                 await PromiseUtil.sleep(1000);
                 this.saveBtnDisable = this.oldAllSetting.equals(this.allSetting);

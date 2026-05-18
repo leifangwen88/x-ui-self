@@ -35,6 +35,7 @@ func (a *XUIController) initRouter(g *gin.RouterGroup) {
 	a.gameController = NewGameController(g)
 	NewSubManageController(g)
 	NewBackupController(g)
+	NewPanelSyncManageController(g)
 }
 
 func (a *XUIController) index(c *gin.Context) {

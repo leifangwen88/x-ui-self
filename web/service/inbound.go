@@ -66,7 +66,11 @@ func (s *InboundService) AddInbound(inbound *model.Inbound) error {
 		inbound.RotationPolicy = model.RotationPolicyPreferUnusedUnbanned
 	}
 	db := database.GetDB()
-	return db.Save(inbound).Error
+	if err := db.Save(inbound).Error; err != nil {
+		return err
+	}
+	EmitInboundUpsert(inbound)
+	return nil
 }
 
 func (s *InboundService) AddInbounds(inbounds []*model.Inbound) error {
@@ -102,8 +106,17 @@ func (s *InboundService) AddInbounds(inbounds []*model.Inbound) error {
 }
 
 func (s *InboundService) DelInbound(id int) error {
+	ib, err := s.GetInbound(id)
+	if err != nil {
+		return err
+	}
+	port := ib.Port
 	db := database.GetDB()
-	return db.Delete(model.Inbound{}, id).Error
+	if err := db.Delete(model.Inbound{}, id).Error; err != nil {
+		return err
+	}
+	EmitInboundDeletePort(port)
+	return nil
 }
 
 func (s *InboundService) GetInbound(id int) (*model.Inbound, error) {
@@ -129,6 +142,10 @@ func (s *InboundService) UpdateInbound(inbound *model.Inbound) error {
 	if err != nil {
 		return err
 	}
+	prevPort := oldInbound.Port
+	prevRemark := oldInbound.Remark
+	prevSocks := oldInbound.SocksProxyId
+	prevGame := oldInbound.GameId
 	oldInbound.Up = inbound.Up
 	oldInbound.Down = inbound.Down
 	oldInbound.Total = inbound.Total
@@ -156,7 +173,16 @@ func (s *InboundService) UpdateInbound(inbound *model.Inbound) error {
 	oldInbound.Tag = fmt.Sprintf("inbound-%v", inbound.Port)
 
 	db := database.GetDB()
-	return db.Save(oldInbound).Error
+	if err := db.Save(oldInbound).Error; err != nil {
+		return err
+	}
+	if globalPanelSync != nil && !globalPanelSync.IsApplying() {
+		if prevPort != inbound.Port {
+			EmitInboundDeletePort(prevPort)
+		}
+		EmitInboundUpsert(oldInbound)
+	}
+	return nil
 }
 
 func (s *InboundService) checkSocksProxyId(socksProxyId int) error {
@@ -216,6 +242,9 @@ func (s *InboundService) UpdateGameId(id int, gameId int) error {
 	if result.RowsAffected == 0 {
 		return common.NewError("入站不存在:", id)
 	}
+	if globalPanelSync != nil && !globalPanelSync.IsApplying() {
+		EmitInboundUpsertById(id)
+	}
 	return nil
 }
 
@@ -249,6 +278,9 @@ func (s *InboundService) UpdateSocksProxyId(id int, socksProxyId int) error {
 	if socksProxyId > 0 && inbound.GameId > 0 {
 		socksGame := SocksGameService{}
 		_ = socksGame.RecordUsage(socksProxyId, inbound.GameId)
+	}
+	if globalPanelSync != nil && !globalPanelSync.IsApplying() {
+		EmitInboundUpsertById(id)
 	}
 	return nil
 }

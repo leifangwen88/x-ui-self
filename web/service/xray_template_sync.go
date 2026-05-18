@@ -67,12 +67,16 @@ func (s *SocksProxyService) SyncBindingsFromTemplate(templateJSON string) (*Temp
 		} else {
 			result.SocksMatched++
 		}
+		if sp, err := s.GetById(socksId); err == nil {
+			EmitSocksUpsert(sp)
+		}
 		if inbound.SocksProxyId != socksId {
 			inbound.SocksProxyId = socksId
 			if err := db.Model(inbound).Update("socks_proxy_id", socksId).Error; err != nil {
 				return nil, err
 			}
 			result.InboundBound++
+			EmitInboundUpsert(inbound)
 		}
 	}
 	return result, nil
@@ -178,6 +182,9 @@ func (s *SocksProxyService) upsertSocksProxy(ob socksOutboundParsed) (int, bool,
 		if err := db.Model(&exist).Updates(updates).Error; err != nil {
 			return 0, false, err
 		}
+		if row, err := s.GetById(exist.Id); err == nil {
+			EmitSocksUpsert(row)
+		}
 		return exist.Id, false, nil
 	}
 	if err != nil && err != gorm.ErrRecordNotFound {
@@ -196,5 +203,6 @@ func (s *SocksProxyService) upsertSocksProxy(ob socksOutboundParsed) (int, bool,
 	if err := db.Create(socks).Error; err != nil {
 		return 0, false, err
 	}
+	EmitSocksUpsert(socks)
 	return socks.Id, true, nil
 }

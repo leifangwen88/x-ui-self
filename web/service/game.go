@@ -58,23 +58,46 @@ func (s *GameService) Save(game *model.Game) error {
 	}
 	game.Code = strings.TrimSpace(game.Code)
 	if game.Id > 0 {
-		return db.Model(model.Game{}).Where("id = ?", game.Id).Updates(map[string]interface{}{
+		if err := db.Model(model.Game{}).Where("id = ?", game.Id).Updates(map[string]interface{}{
 			"name":       game.Name,
 			"code":       game.Code,
 			"enable":     game.Enable,
 			"sort_order": game.SortOrder,
 			"remark":     game.Remark,
-		}).Error
+		}).Error; err != nil {
+			return err
+		}
+		saved, err := s.GetById(game.Id)
+		if err == nil {
+			EmitGameUpsert(saved)
+		}
+		return nil
 	}
-	return db.Create(game).Error
+	if err := db.Create(game).Error; err != nil {
+		return err
+	}
+	EmitGameUpsert(game)
+	return nil
 }
 
 func (s *GameService) Del(id int) error {
+	g, err := s.GetById(id)
+	if err != nil {
+		return err
+	}
+	code := strings.TrimSpace(g.Code)
+	if code == "" {
+		code = fmt.Sprintf("game_%d", g.Id)
+	}
 	db := database.GetDB()
 	var inboundCount int64
 	db.Model(model.Inbound{}).Where("game_id = ?", id).Count(&inboundCount)
 	if inboundCount > 0 {
 		return common.NewError("仍有入站绑定此游戏，无法删除")
 	}
-	return db.Delete(model.Game{}, id).Error
+	if err := db.Delete(model.Game{}, id).Error; err != nil {
+		return err
+	}
+	EmitGameDeleteByCode(code)
+	return nil
 }

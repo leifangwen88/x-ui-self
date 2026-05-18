@@ -46,7 +46,35 @@ func initGame() error {
 }
 
 func initSocksGame() error {
-	return db.AutoMigrate(&model.SocksGameStatus{}, &model.SocksRotationLog{})
+	if err := db.AutoMigrate(&model.SocksGameStatus{}, &model.SocksRotationLog{}); err != nil {
+		return err
+	}
+	return backfillSocksGameStatusKeys()
+}
+
+func backfillSocksGameStatusKeys() error {
+	var list []*model.SocksGameStatus
+	if err := db.Where("socks_address = '' OR socks_address IS NULL").Find(&list).Error; err != nil {
+		return err
+	}
+	for _, st := range list {
+		if st.SocksProxyId <= 0 {
+			continue
+		}
+		var sp model.SocksProxy
+		if err := db.First(&sp, st.SocksProxyId).Error; err != nil {
+			continue
+		}
+		_ = db.Model(st).Updates(map[string]interface{}{
+			"socks_address": sp.Address,
+			"socks_port":    sp.Port,
+		}).Error
+	}
+	return nil
+}
+
+func initSync() error {
+	return db.AutoMigrate(&model.SyncOutbox{}, &model.SyncReceived{}, &model.SyncPeerCursor{})
 }
 
 func initSetting() error {
@@ -97,6 +125,10 @@ func InitDB(dbPath string) error {
 		return err
 	}
 	err = initSocksGame()
+	if err != nil {
+		return err
+	}
+	err = initSync()
 	if err != nil {
 		return err
 	}

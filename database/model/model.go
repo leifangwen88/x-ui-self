@@ -71,13 +71,35 @@ type Game struct {
 
 type SocksGameStatus struct {
 	Id           int    `json:"id" gorm:"primaryKey;autoIncrement"`
-	SocksProxyId int    `json:"socksProxyId" gorm:"uniqueIndex:idx_socks_game"`
-	GameId       int    `json:"gameId" gorm:"uniqueIndex:idx_socks_game"`
+	SocksProxyId int    `json:"socksProxyId" gorm:"index"`
+	GameId       int    `json:"gameId" gorm:"uniqueIndex:idx_socks_game_key"`
+	SocksAddress string `json:"socksAddress" gorm:"uniqueIndex:idx_socks_game_key"`
+	SocksPort    int    `json:"socksPort" gorm:"uniqueIndex:idx_socks_game_key"`
 	Status       string `json:"status" gorm:"default:active;index"`
 	BannedAt     int64  `json:"bannedAt"`
 	LastUsedAt   int64  `json:"lastUsedAt"`
 	UseCount     int    `json:"useCount" gorm:"default:0"`
 	Note         string `json:"note"`
+}
+
+type SyncOutbox struct {
+	EventId   string `json:"eventId" gorm:"primaryKey"`
+	NodeId    string `json:"nodeId" gorm:"index"`
+	CreatedAt int64  `json:"createdAt" gorm:"index"`
+	Type      string `json:"type" gorm:"index"`
+	Payload   string `json:"payload"`
+}
+
+type SyncReceived struct {
+	EventId    string `json:"eventId" gorm:"primaryKey"`
+	FromNodeId string `json:"fromNodeId" gorm:"index"`
+	ReceivedAt int64  `json:"receivedAt"`
+}
+
+type SyncPeerCursor struct {
+	PeerKey   string `json:"peerKey" gorm:"primaryKey"`
+	LastPull  int64  `json:"lastPull"`
+	AlignedAt int64  `json:"alignedAt" gorm:"default:0"`
 }
 
 type SocksRotationLog struct {

@@ -24,14 +24,15 @@ type SubGameGroup struct {
 }
 
 type SubInfo struct {
-	Token               string         `json:"token"`
-	SubHost             string         `json:"subHost"`
-	Base64Path          string         `json:"base64Path"`
-	LinksPath           string         `json:"linksPath"`
-	ClashPath           string         `json:"clashPath"`
-	TotalInboundCount   int            `json:"totalInboundCount"`
-	UnspecifiedCount    int            `json:"unspecifiedCount"`
-	Groups              []SubGameGroup `json:"groups"`
+	Token               string          `json:"token"`
+	SubHost             string          `json:"subHost"`
+	Base64Path          string          `json:"base64Path"`
+	LinksPath           string          `json:"linksPath"`
+	ClashPath           string          `json:"clashPath"`
+	TotalInboundCount   int             `json:"totalInboundCount"`
+	UnspecifiedCount    int             `json:"unspecifiedCount"`
+	Groups              []SubGameGroup  `json:"groups"`
+	Cluster             *ClusterSubMeta `json:"cluster,omitempty"`
 }
 
 func (s *SubscriptionService) GetInfo() (*SubInfo, error) {
@@ -47,6 +48,7 @@ func (s *SubscriptionService) GetInfo() (*SubInfo, error) {
 	if err != nil {
 		return nil, err
 	}
+	clusterMeta, _ := s.GetClusterSubMeta()
 	return &SubInfo{
 		Token:             token,
 		SubHost:           subHost,
@@ -56,6 +58,7 @@ func (s *SubscriptionService) GetInfo() (*SubInfo, error) {
 		TotalInboundCount: total,
 		UnspecifiedCount:  unspecified,
 		Groups:            groups,
+		Cluster:           clusterMeta,
 	}, nil
 }
 

@@ -35,6 +35,11 @@ var defaultValueMap = map[string]string{
 	"tgRunTime":          "",
 	"subToken":           "",
 	"subHost":            "",
+	"panelNodeId":        "",
+	"panelSyncSecret":     "",
+	"panelSyncPublicURL":  "",
+	"panelSyncEnabled":    "false",
+	"panelSyncPeers":      "[]",
 }
 
 type SettingService struct {
@@ -315,6 +320,7 @@ func (s *SettingService) UpdateAllSetting(allSetting *entity.AllSetting) error {
 	if err := allSetting.CheckValid(); err != nil {
 		return err
 	}
+	oldXray, _ := s.GetXrayConfigTemplate()
 
 	v := reflect.ValueOf(allSetting).Elem()
 	t := reflect.TypeOf(allSetting).Elem()
@@ -329,5 +335,13 @@ func (s *SettingService) UpdateAllSetting(allSetting *entity.AllSetting) error {
 			errs = append(errs, err)
 		}
 	}
-	return common.Combine(errs...)
+	err := common.Combine(errs...)
+	if err != nil {
+		return err
+	}
+	newXray, _ := s.GetXrayConfigTemplate()
+	if newXray != oldXray {
+		EmitXrayTemplate(newXray)
+	}
+	return nil
 }

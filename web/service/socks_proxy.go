@@ -88,6 +88,7 @@ func (s *SocksProxyService) ImportFromText(text string, expiryTime int64) (*Sock
 			result.Errors = append(result.Errors, err.Error())
 			continue
 		}
+		EmitSocksUpsert(socks)
 		result.Imported++
 	}
 	return result, nil
@@ -105,6 +106,8 @@ func (s *SocksProxyService) DeleteByIds(ids []int) error {
 		return common.NewError("未选择要删除的 SOCKS")
 	}
 	db := database.GetDB()
+	var proxies []*model.SocksProxy
+	_ = db.Where("id IN ?", ids).Find(&proxies).Error
 	tx := db.Begin()
 	if err := tx.Model(model.Inbound{}).Where("socks_proxy_id IN ?", ids).Update("socks_proxy_id", 0).Error; err != nil {
 		tx.Rollback()
@@ -115,7 +118,17 @@ func (s *SocksProxyService) DeleteByIds(ids []int) error {
 		tx.Rollback()
 		return err
 	}
-	return tx.Commit().Error
+	if err := tx.Commit().Error; err != nil {
+		return err
+	}
+	if globalPanelSync != nil && !globalPanelSync.IsApplying() {
+		for _, p := range proxies {
+			if p != nil {
+				globalPanelSync.EmitSocksDelete(p.Address, p.Port)
+			}
+		}
+	}
+	return nil
 }
 
 func (s *SocksProxyService) ListExpiredIds() ([]int, error) {
@@ -161,6 +174,10 @@ func (s *SocksProxyService) UpdateRemark(id int, remark string) error {
 	}
 	if result.RowsAffected == 0 {
 		return common.NewError("SOCKS5 不存在:", id)
+	}
+	sp, err := s.GetById(id)
+	if err == nil {
+		EmitSocksUpsert(sp)
 	}
 	return nil
 }

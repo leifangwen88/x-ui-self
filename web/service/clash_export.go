@@ -9,6 +9,12 @@ import (
 	"x-ui/database/model"
 )
 
+// Clash 订阅在客户端展示的顶层策略组名称
+const (
+	ClashGroupSingleSite = "单站"
+	ClashGroupClusterLB  = "站群负载均衡"
+)
+
 func GenClashYamlByGame(inbounds []*model.Inbound, subHost string, requestHost string) string {
 	gameName := make(map[int]string)
 	gameService := GameService{}
@@ -70,12 +76,12 @@ func GenClashYamlByGame(inbounds []*model.Inbound, subHost string, requestHost s
 		return ""
 	}
 	var b strings.Builder
-	b.WriteString("# Clash / Mihomo 订阅（按游戏分组）\n")
+	b.WriteString("# Clash / Mihomo 单站订阅（按游戏分组）\n")
 	b.WriteString("proxies:\n")
 	b.WriteString(strings.Join(proxyBlocks, "\n"))
 	b.WriteString("\n\nproxy-groups:\n")
 	b.WriteString(strings.Join(groupBlocks, "\n"))
-	b.WriteString("\n  - name: \"节点选择\"\n    type: select\n    proxies:\n")
+	b.WriteString(fmt.Sprintf("\n  - name: %s\n    type: select\n    proxies:\n", yamlQuote(ClashGroupSingleSite)))
 	for _, gid := range order {
 		gn := gameName[gid]
 		if gn == "" && gid == 0 {
@@ -89,7 +95,9 @@ func GenClashYamlByGame(inbounds []*model.Inbound, subHost string, requestHost s
 			b.WriteString("\n")
 		}
 	}
-	b.WriteString("      - DIRECT\n\nrules:\n  - MATCH,节点选择\n")
+	b.WriteString("      - DIRECT\n\nrules:\n  - MATCH,")
+	b.WriteString(ClashGroupSingleSite)
+	b.WriteString("\n")
 	return b.String()
 }
 
@@ -140,11 +148,11 @@ func GenClashYaml(inbounds []*model.Inbound, subHost string, requestHost string)
 	}
 
 	var b strings.Builder
-	b.WriteString("# Clash / Mihomo 订阅（x-ui）\n")
+	b.WriteString("# Clash / Mihomo 单站订阅\n")
 	b.WriteString("proxies:\n")
 	b.WriteString(strings.Join(proxyBlocks, "\n"))
 	b.WriteString("\n\nproxy-groups:\n")
-	b.WriteString("  - name: \"节点选择\"\n")
+	b.WriteString(fmt.Sprintf("  - name: %s\n", yamlQuote(ClashGroupSingleSite)))
 	b.WriteString("    type: select\n")
 	b.WriteString("    proxies:\n")
 	for _, n := range names {
@@ -153,8 +161,92 @@ func GenClashYaml(inbounds []*model.Inbound, subHost string, requestHost string)
 		b.WriteString("\n")
 	}
 	b.WriteString("      - DIRECT\n\nrules:\n")
-	b.WriteString("  - MATCH,节点选择\n")
+	b.WriteString("  - MATCH,")
+	b.WriteString(ClashGroupSingleSite)
+	b.WriteString("\n")
 	return b.String()
+}
+
+const clusterHealthURL = "http://www.gstatic.com/generate_204"
+const clusterHealthInterval = 300
+
+// buildClusterInboundGroupYamls 单入站站群组：首选池 load-balance，整组 fallback 链接兜底机
+func buildClusterInboundGroupYamls(groupName string, primary, fallback []string) (blocks []string, rootQuoted string) {
+	gn := strings.TrimSpace(groupName)
+	if gn == "" {
+		return nil, ""
+	}
+	if len(primary) == 0 && len(fallback) == 0 {
+		return nil, ""
+	}
+	primaryPick := gn + "-首选"
+	if len(primary) == 0 {
+		blocks = append(blocks, clashFallbackGroupYaml(gn, fallback))
+		return blocks, yamlQuote(gn)
+	}
+	if len(fallback) == 0 {
+		if len(primary) == 1 {
+			return nil, yamlQuote(primary[0])
+		}
+		blocks = append(blocks, clashLoadBalanceGroupYaml(gn, primary))
+		return blocks, yamlQuote(gn)
+	}
+	chain := make([]string, 0, 1+len(fallback))
+	if len(primary) == 1 {
+		chain = append(chain, primary[0])
+	} else {
+		blocks = append(blocks, clashLoadBalanceGroupYaml(primaryPick, primary))
+		chain = append(chain, primaryPick)
+	}
+	chain = append(chain, fallback...)
+	blocks = append(blocks, clashFallbackGroupYaml(gn, chain))
+	return blocks, yamlQuote(gn)
+}
+
+func clashLoadBalanceGroupYaml(groupName string, proxyNames []string) string {
+	if len(proxyNames) == 0 {
+		return ""
+	}
+	var gb strings.Builder
+	gb.WriteString(fmt.Sprintf("  - name: %s\n", yamlQuote(groupName)))
+	gb.WriteString("    type: load-balance\n")
+	gb.WriteString("    strategy: round-robin\n")
+	gb.WriteString("    url: " + clusterHealthURL + "\n")
+	gb.WriteString(fmt.Sprintf("    interval: %d\n", clusterHealthInterval))
+	gb.WriteString("    proxies:\n")
+	for _, n := range proxyNames {
+		gb.WriteString("      - " + yamlQuote(n) + "\n")
+	}
+	return gb.String()
+}
+
+func clashSelectGroupYaml(groupName string, members []string) string {
+	if len(members) == 0 {
+		return ""
+	}
+	var gb strings.Builder
+	gb.WriteString(fmt.Sprintf("  - name: %s\n    type: select\n    proxies:\n", yamlQuote(groupName)))
+	for _, m := range members {
+		gb.WriteString("      - " + m + "\n")
+	}
+	gb.WriteString("      - DIRECT\n")
+	return gb.String()
+}
+
+func clashFallbackGroupYaml(groupName string, chain []string) string {
+	if len(chain) == 0 {
+		return ""
+	}
+	var gb strings.Builder
+	gb.WriteString(fmt.Sprintf("  - name: %s\n", yamlQuote(groupName)))
+	gb.WriteString("    type: fallback\n")
+	gb.WriteString("    url: " + clusterHealthURL + "\n")
+	gb.WriteString(fmt.Sprintf("    interval: %d\n", clusterHealthInterval))
+	gb.WriteString("    proxies:\n")
+	for _, n := range chain {
+		gb.WriteString("      - " + yamlQuote(n) + "\n")
+	}
+	return gb.String()
 }
 
 func yamlQuote(s string) string {
