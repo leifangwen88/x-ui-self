@@ -143,9 +143,6 @@ func (s *InboundService) UpdateInbound(inbound *model.Inbound) error {
 		return err
 	}
 	prevPort := oldInbound.Port
-	prevRemark := oldInbound.Remark
-	prevSocks := oldInbound.SocksProxyId
-	prevGame := oldInbound.GameId
 	oldInbound.Up = inbound.Up
 	oldInbound.Down = inbound.Down
 	oldInbound.Total = inbound.Total

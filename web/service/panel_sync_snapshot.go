@@ -188,9 +188,7 @@ func diffGames(local, peer []GameBackup) PanelAlignCategoryDiff {
 	for _, g := range peer {
 		pm[strings.TrimSpace(g.Code)] = g
 	}
-	return diffMaps(lm, pm, func(a, b GameBackup) bool {
-		return a.Name == b.Name && a.Enable == b.Enable && a.SortOrder == b.SortOrder && a.Remark == b.Remark
-	})
+	return diffGameMaps(lm, pm)
 }
 
 func diffSocks(local, peer []SocksBackup) PanelAlignCategoryDiff {
@@ -201,10 +199,7 @@ func diffSocks(local, peer []SocksBackup) PanelAlignCategoryDiff {
 	for _, sp := range peer {
 		pm[SocksNaturalKey(sp.Address, sp.Port)] = sp
 	}
-	return diffMaps(lm, pm, func(a, b SocksBackup) bool {
-		return a.Username == b.Username && a.Password == b.Password && a.Enable == b.Enable &&
-			a.Remark == b.Remark && a.ExpiryTime == b.ExpiryTime
-	})
+	return diffSocksMaps(lm, pm)
 }
 
 func diffInbounds(local, peer []InboundBackup) PanelAlignCategoryDiff {
@@ -274,19 +269,16 @@ func diffMarks(local, peer []SocksGameMarkBackup) PanelAlignCategoryDiff {
 	for _, mk := range peer {
 		pm[markKey(mk.SocksKey, mk.GameCode)] = mk
 	}
-	return diffMaps(lm, pm, func(a, b SocksGameMarkBackup) bool {
-		return a.Status == b.Status && a.BannedAt == b.BannedAt &&
-			a.LastUsedAt == b.LastUsedAt && a.UseCount == b.UseCount
-	})
+	return diffMarkMaps(lm, pm)
 }
 
 func markKey(socksKey, gameCode string) string {
 	return socksKey + "|" + gameCode
 }
 
-func diffMaps[K comparable, V any](lm, pm map[K]V, same func(V, V) bool) PanelAlignCategoryDiff {
+func diffGameMaps(lm, pm map[string]GameBackup) PanelAlignCategoryDiff {
 	d := PanelAlignCategoryDiff{}
-	seen := map[K]bool{}
+	seen := map[string]bool{}
 	for k, a := range lm {
 		seen[k] = true
 		b, ok := pm[k]
@@ -294,7 +286,53 @@ func diffMaps[K comparable, V any](lm, pm map[K]V, same func(V, V) bool) PanelAl
 			d.LocalOnly++
 			continue
 		}
-		if !same(a, b) {
+		if a.Name != b.Name || a.Enable != b.Enable || a.SortOrder != b.SortOrder || a.Remark != b.Remark {
+			d.Conflict++
+		}
+	}
+	for k := range pm {
+		if !seen[k] {
+			d.PeerOnly++
+		}
+	}
+	return d
+}
+
+func diffSocksMaps(lm, pm map[string]SocksBackup) PanelAlignCategoryDiff {
+	d := PanelAlignCategoryDiff{}
+	seen := map[string]bool{}
+	for k, a := range lm {
+		seen[k] = true
+		b, ok := pm[k]
+		if !ok {
+			d.LocalOnly++
+			continue
+		}
+		if a.Username != b.Username || a.Password != b.Password || a.Enable != b.Enable ||
+			a.Remark != b.Remark || a.ExpiryTime != b.ExpiryTime {
+			d.Conflict++
+		}
+	}
+	for k := range pm {
+		if !seen[k] {
+			d.PeerOnly++
+		}
+	}
+	return d
+}
+
+func diffMarkMaps(lm, pm map[string]SocksGameMarkBackup) PanelAlignCategoryDiff {
+	d := PanelAlignCategoryDiff{}
+	seen := map[string]bool{}
+	for k, a := range lm {
+		seen[k] = true
+		b, ok := pm[k]
+		if !ok {
+			d.LocalOnly++
+			continue
+		}
+		if a.Status != b.Status || a.BannedAt != b.BannedAt ||
+			a.LastUsedAt != b.LastUsedAt || a.UseCount != b.UseCount {
 			d.Conflict++
 		}
 	}

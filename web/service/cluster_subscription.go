@@ -210,7 +210,7 @@ func (s *SubscriptionService) collectClusterMembers(subHost string, localRequest
 			order = append(order, key)
 			seenOrder[key] = true
 		}
-		members[key] = append(members, m)
+		members[key] = append(members[key], m)
 	}
 
 	localLabel := "本机"
