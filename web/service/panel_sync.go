@@ -139,7 +139,7 @@ func (s *PanelSyncService) GetConfig() (*PanelSyncConfig, error) {
 		cfg.Peers = []SyncPeerConfig{}
 	}
 	rawMembers, _ := s.loadClusterMembers()
-	members = s.migratePeersToMembersIfNeeded(cfg, rawMembers)
+	members := s.migratePeersToMembersIfNeeded(cfg, rawMembers)
 	sanitized := s.sanitizeClusterMembers(cfg, members)
 	if len(sanitized) != len(members) || hasMislabeledLocalMembers(members, cfg) {
 		_ = s.saveClusterMembers(sanitized)
