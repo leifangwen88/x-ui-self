@@ -54,6 +54,7 @@ type PanelAlignCompareResult struct {
 
 type PanelAlignApplyRequest struct {
 	PeerIndex           int    `json:"peerIndex" form:"peerIndex"`
+	PeerBaseURL         string `json:"peerBaseUrl" form:"peerBaseUrl"`
 	GamesSource         string `json:"gamesSource" form:"gamesSource"`
 	SocksSource         string `json:"socksSource" form:"socksSource"`
 	InboundsSource      string `json:"inboundsSource" form:"inboundsSource"`

@@ -450,12 +450,21 @@
             removeSyncPeer(idx) {
                 this.syncConfig.peers.splice(idx, 1);
             },
+            buildSyncSavePayload() {
+                const c = this.syncConfig || {};
+                return {
+                    enabled: !!c.enabled,
+                    nodeId: c.nodeId || '',
+                    secret: c.secret || '',
+                    publicUrl: c.publicUrl || '',
+                    localFallback: !!c.localFallback,
+                    peersJson: JSON.stringify(c.peers || []),
+                };
+            },
             async saveSyncConfig() {
                 this.syncSaving = true;
                 try {
-                    const payload = Object.assign({}, this.syncConfig);
-                    delete payload.peerStatus;
-                    const msg = await HttpUtil.post('/xui/sync/saveConfig', payload);
+                    const msg = await HttpUtil.post('/xui/sync/saveConfig', this.buildSyncSavePayload());
                     if (msg.success) {
                         this.$message.success('同步配置已保存');
                         await this.loadSyncConfig();
@@ -509,8 +518,10 @@
                 this.alignComparing = true;
                 try {
                     await this.saveSyncConfig();
+                    const peer = (this.syncConfig.peers || [])[this.alignWizardPeerIndex] || {};
                     const msg = await HttpUtil.post('/xui/sync/align/compare', {
                         peerIndex: this.alignWizardPeerIndex,
+                        peerBaseUrl: peer.baseUrl || '',
                     });
                     if (msg.success) {
                         this.alignCompare = msg.obj;
@@ -537,8 +548,10 @@
                         onOk: async () => {
                             this.alignApplying = true;
                             try {
+                                const peer = (this.syncConfig.peers || [])[this.alignWizardPeerIndex] || {};
                                 const msg = await HttpUtil.post('/xui/sync/align/apply', {
                                     peerIndex: this.alignWizardPeerIndex,
+                                    peerBaseUrl: peer.baseUrl || '',
                                     gamesSource: this.alignChoices.gamesSource,
                                     socksSource: this.alignChoices.socksSource,
                                     inboundsSource: this.alignChoices.inboundsSource,

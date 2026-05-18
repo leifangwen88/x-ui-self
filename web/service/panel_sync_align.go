@@ -12,6 +12,29 @@ import (
 	"gorm.io/gorm"
 )
 
+func normalizePeerKey(baseURL string) string {
+	return strings.TrimRight(strings.TrimSpace(baseURL), "/")
+}
+
+func resolvePeerIndex(cfg *PanelSyncConfig, peerIndex int, peerBaseURL string) (int, error) {
+	if cfg == nil {
+		return -1, common.NewError("配置为空")
+	}
+	if peerIndex >= 0 && peerIndex < len(cfg.Peers) {
+		return peerIndex, nil
+	}
+	key := normalizePeerKey(peerBaseURL)
+	if key == "" {
+		return -1, common.NewError("无效的对等节点索引")
+	}
+	for i, p := range cfg.Peers {
+		if normalizePeerKey(p.BaseURL) == key {
+			return i, nil
+		}
+	}
+	return -1, common.NewError("无效的对等节点索引")
+}
+
 func (s *PanelSyncService) ListPeerAlignStatus(cfg *PanelSyncConfig) []PanelPeerAlignStatus {
 	if cfg == nil {
 		return nil
@@ -35,15 +58,16 @@ func (s *PanelSyncService) ListPeerAlignStatus(cfg *PanelSyncConfig) []PanelPeer
 	return list
 }
 
-func (s *PanelSyncService) CompareWithPeer(peerIndex int) (*PanelAlignCompareResult, error) {
+func (s *PanelSyncService) CompareWithPeer(peerIndex int, peerBaseURL string) (*PanelAlignCompareResult, error) {
 	cfg, err := s.GetConfig()
 	if err != nil {
 		return nil, err
 	}
-	if peerIndex < 0 || peerIndex >= len(cfg.Peers) {
-		return nil, common.NewError("无效的对等节点索引")
+	idx, err := resolvePeerIndex(cfg, peerIndex, peerBaseURL)
+	if err != nil {
+		return nil, err
 	}
-	peer := cfg.Peers[peerIndex]
+	peer := cfg.Peers[idx]
 	peerKey := strings.TrimSpace(peer.BaseURL)
 	if peerKey == "" {
 		return nil, common.NewError("对等节点地址为空")
@@ -90,10 +114,11 @@ func (s *PanelSyncService) ApplyClusterAlign(userId int, req *PanelAlignApplyReq
 	if err != nil {
 		return nil, err
 	}
-	if peerIndex := req.PeerIndex; peerIndex < 0 || peerIndex >= len(cfg.Peers) {
-		return nil, common.NewError("无效的对等节点索引")
+	idx, err := resolvePeerIndex(cfg, req.PeerIndex, req.PeerBaseURL)
+	if err != nil {
+		return nil, err
 	}
-	peer := cfg.Peers[req.PeerIndex]
+	peer := cfg.Peers[idx]
 	peerKey := strings.TrimSpace(peer.BaseURL)
 	if peerKey == "" {
 		return nil, common.NewError("对等节点地址为空")

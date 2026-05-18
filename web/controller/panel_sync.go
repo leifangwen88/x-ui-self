@@ -1,7 +1,9 @@
 package controller
 
 import (
+	"encoding/json"
 	"strconv"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	"x-ui/util/common"
@@ -141,6 +143,14 @@ func (a *PanelSyncController) saveConfig(c *gin.Context) {
 		jsonMsg(c, "保存同步配置", err)
 		return
 	}
+	if len(req.Peers) == 0 {
+		if peersJSON := strings.TrimSpace(c.PostForm("peersJson")); peersJSON != "" {
+			if err := json.Unmarshal([]byte(peersJSON), &req.Peers); err != nil {
+				jsonMsg(c, "保存同步配置", err)
+				return
+			}
+		}
+	}
 	err := a.panelSync().SaveConfig(req)
 	jsonMsg(c, "保存同步配置", err)
 }
@@ -152,13 +162,14 @@ func (a *PanelSyncController) runNow(c *gin.Context) {
 
 func (a *PanelSyncController) alignCompare(c *gin.Context) {
 	req := struct {
-		PeerIndex int `json:"peerIndex"`
+		PeerIndex   int    `json:"peerIndex" form:"peerIndex"`
+		PeerBaseURL string `json:"peerBaseUrl" form:"peerBaseUrl"`
 	}{}
 	if err := c.ShouldBind(&req); err != nil {
 		jsonMsg(c, "对比对齐", err)
 		return
 	}
-	res, err := a.panelSync().CompareWithPeer(req.PeerIndex)
+	res, err := a.panelSync().CompareWithPeer(req.PeerIndex, req.PeerBaseURL)
 	if err != nil {
 		jsonMsg(c, "对比对齐", err)
 		return
