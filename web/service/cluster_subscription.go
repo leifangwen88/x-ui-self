@@ -4,6 +4,7 @@ import (
 	"encoding/base64"
 	"fmt"
 	"net/url"
+	"sort"
 	"strings"
 
 	"x-ui/database/model"
@@ -199,6 +200,20 @@ func clusterPeersForSubscription(cfg *PanelSyncConfig) []SyncPeerConfig {
 	return out
 }
 
+func clusterMemberSortKey(m clusterMember) string {
+	label := clusterSubDisplayLabel(m.NodeLabel, m.ConnectHost)
+	if m.Fallback {
+		return "1:" + label
+	}
+	return "0:" + label
+}
+
+func sortClusterMembersStable(list []clusterMember) {
+	sort.SliceStable(list, func(i, j int) bool {
+		return clusterMemberSortKey(list[i]) < clusterMemberSortKey(list[j])
+	})
+}
+
 func dedupeClusterMembersByHost(list []clusterMember) []clusterMember {
 	byHost := make(map[string]clusterMember)
 	rank := func(m clusterMember) int {
@@ -228,7 +243,52 @@ func dedupeClusterMembersByHost(list []clusterMember) []clusterMember {
 		}
 		out = append(out, m)
 	}
+	sortClusterMembersStable(out)
 	return out
+}
+
+func sortClusterInboundKeyOrder(order []string, members map[string][]clusterMember) {
+	sort.SliceStable(order, func(i, j int) bool {
+		li := members[order[i]]
+		lj := members[order[j]]
+		if len(li) == 0 {
+			return false
+		}
+		if len(lj) == 0 {
+			return true
+		}
+		ni := displayInboundName(li[0].Inbound.Remark, li[0].Inbound.Port)
+		nj := displayInboundName(lj[0].Inbound.Remark, lj[0].Inbound.Port)
+		if ni != nj {
+			return ni < nj
+		}
+		gi := normalizeClusterGameId(li[0].GameId)
+		gj := normalizeClusterGameId(lj[0].GameId)
+		if gi != gj {
+			return gi < gj
+		}
+		return order[i] < order[j]
+	})
+}
+
+func localClusterNodeLabel(cfg *PanelSyncConfig, localHost string) string {
+	if cfg == nil {
+		return clusterSubDisplayLabel("本机", localHost)
+	}
+	selfURL := normalizePeerKey(cfg.PublicURL)
+	for _, m := range cfg.Members {
+		url := normalizePeerKey(m.PublicURL)
+		if url == "" && strings.TrimSpace(m.NodeId) == "" {
+			continue
+		}
+		if url != selfURL && (cfg.NodeId == "" || strings.TrimSpace(m.NodeId) != cfg.NodeId) {
+			continue
+		}
+		if n := strings.TrimSpace(m.Name); n != "" && !isClusterMetaPeerLabel(n) {
+			return n
+		}
+	}
+	return clusterSubDisplayLabel("本机", localHost)
 }
 
 func inboundMatchesGameFilter(ib *model.Inbound, gameId int) bool {
@@ -310,13 +370,11 @@ func (s *SubscriptionService) collectClusterMembers(subHost string, localRequest
 	localHost := hostOnly(localRequestHost)
 	if globalPanelSync != nil {
 		if cfg, err := globalPanelSync.GetConfig(); err == nil {
-			if strings.TrimSpace(cfg.NodeId) != "" {
-				localLabel = strings.TrimSpace(cfg.NodeId)
-			}
 			localFallback = cfg.LocalFallback
 			if h := peerConnectHost(SyncPeerConfig{BaseURL: cfg.PublicURL}); h != "" {
 				localHost = h
 			}
+			localLabel = localClusterNodeLabel(cfg, localHost)
 		}
 	}
 	localInbounds, err := s.filterInbounds(gameId)
@@ -332,10 +390,12 @@ func (s *SubscriptionService) collectClusterMembers(subHost string, localRequest
 	}
 
 	if globalPanelSync == nil {
+		sortClusterInboundKeyOrder(order, members)
 		return members, order, nil
 	}
 	cfg, err := globalPanelSync.GetConfig()
 	if err != nil || !cfg.Enabled {
+		sortClusterInboundKeyOrder(order, members)
 		return members, order, nil
 	}
 	games, _ := s.gameService.GetAll()
@@ -388,6 +448,7 @@ func (s *SubscriptionService) collectClusterMembers(subHost string, localRequest
 	for k := range members {
 		members[k] = dedupeClusterMembersByHost(members[k])
 	}
+	sortClusterInboundKeyOrder(order, members)
 	return members, order, nil
 }
 
@@ -609,7 +670,7 @@ func genClusterClashYamlByGame(members map[string][]clusterMember, order []strin
 	}
 
 	var b strings.Builder
-	writeClashYamlHeader(&b, "# Clash / Mihomo 站群订阅（按游戏→入站备注，入站内 load-balance，兜底机 fallback）")
+	writeClashYamlHeader(&b, "# Clash / Mihomo 站群订阅（按游戏→入站备注；每入站一组，内部轮询+兜底，无需再选手选/兜底子组）")
 	b.WriteString("proxies:\n")
 	b.WriteString(strings.Join(proxyBlocks, "\n"))
 	b.WriteString("\n\nproxy-groups:\n")

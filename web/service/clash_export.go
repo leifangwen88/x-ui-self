@@ -170,7 +170,13 @@ const clusterHealthURL = "http://www.gstatic.com/generate_204"
 const clusterHealthInterval = 60
 const clusterHealthTimeoutMs = 5000
 
-// buildClusterInboundGroupYamls 单入站站群组：首选池 load-balance，整组 fallback 链接兜底机
+// clusterInboundLBGroupName 入站内部均衡池（hidden，不对用户展示）
+func clusterInboundLBGroupName(inboundGroup string) string {
+	return strings.TrimSpace(inboundGroup) + "·均衡池"
+}
+
+// buildClusterInboundGroupYamls 每个入站只暴露一个策略组名（inboundGroup）：
+// 首选节点在内部 load-balance 轮询，兜底节点挂在 fallback 链末端，用户只需选入站组无需再选「首选/兜底」。
 func buildClusterInboundGroupYamls(groupName string, primary, fallback []string) (blocks []string, rootQuoted string) {
 	gn := strings.TrimSpace(groupName)
 	if gn == "" {
@@ -179,36 +185,42 @@ func buildClusterInboundGroupYamls(groupName string, primary, fallback []string)
 	if len(primary) == 0 && len(fallback) == 0 {
 		return nil, ""
 	}
-	primaryPick := gn + "-首选"
 	if len(primary) == 0 {
-		blocks = append(blocks, clashFallbackGroupYaml(gn, fallback))
+		blocks = append(blocks, clashFallbackGroupYaml(gn, fallback, false))
 		return blocks, yamlQuote(gn)
 	}
+	// 仅首选、无兜底：一个 load-balance 组即入站名，点选即轮询
 	if len(fallback) == 0 {
 		if len(primary) == 1 {
-			return nil, yamlQuote(primary[0])
+			blocks = append(blocks, clashFallbackGroupYaml(gn, primary, false))
+			return blocks, yamlQuote(gn)
 		}
-		blocks = append(blocks, clashLoadBalanceGroupYaml(gn, primary))
+		blocks = append(blocks, clashLoadBalanceGroupYaml(gn, primary, false))
 		return blocks, yamlQuote(gn)
 	}
+	// 首选 + 兜底：对外仅 gn；首选走隐藏均衡池，兜底挂在 fallback 链后
+	lbName := clusterInboundLBGroupName(gn)
 	chain := make([]string, 0, 1+len(fallback))
 	if len(primary) == 1 {
 		chain = append(chain, primary[0])
 	} else {
-		blocks = append(blocks, clashLoadBalanceGroupYaml(primaryPick, primary))
-		chain = append(chain, primaryPick)
+		blocks = append(blocks, clashLoadBalanceGroupYaml(lbName, primary, true))
+		chain = append(chain, lbName)
 	}
 	chain = append(chain, fallback...)
-	blocks = append(blocks, clashFallbackGroupYaml(gn, chain))
+	blocks = append(blocks, clashFallbackGroupYaml(gn, chain, false))
 	return blocks, yamlQuote(gn)
 }
 
-func clashLoadBalanceGroupYaml(groupName string, proxyNames []string) string {
+func clashLoadBalanceGroupYaml(groupName string, proxyNames []string, hidden bool) string {
 	if len(proxyNames) == 0 {
 		return ""
 	}
 	var gb strings.Builder
 	gb.WriteString(fmt.Sprintf("  - name: %s\n", yamlQuote(groupName)))
+	if hidden {
+		gb.WriteString("    hidden: true\n")
+	}
 	gb.WriteString("    type: load-balance\n")
 	gb.WriteString("    strategy: round-robin\n")
 	gb.WriteString("    url: " + clusterHealthURL + "\n")
@@ -234,12 +246,15 @@ func clashSelectGroupYaml(groupName string, members []string) string {
 	return gb.String()
 }
 
-func clashFallbackGroupYaml(groupName string, chain []string) string {
+func clashFallbackGroupYaml(groupName string, chain []string, hidden bool) string {
 	if len(chain) == 0 {
 		return ""
 	}
 	var gb strings.Builder
 	gb.WriteString(fmt.Sprintf("  - name: %s\n", yamlQuote(groupName)))
+	if hidden {
+		gb.WriteString("    hidden: true\n")
+	}
 	gb.WriteString("    type: fallback\n")
 	gb.WriteString("    url: " + clusterHealthURL + "\n")
 	gb.WriteString(fmt.Sprintf("    interval: %d\n", clusterHealthInterval))
